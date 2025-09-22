@@ -1,6 +1,8 @@
 # zpack
 
-<img src="assets/icons/zpack.png" alt="zpack logo" width="150">
+<div align="center">
+<img src="assets/icons/zpack.png" alt="zpack logo" width="175">
+</div>
 
 [![Built with Zig](https://img.shields.io/badge/built%20with-Zig-yellow?style=flat&logo=zig)](https://ziglang.org/)
 [![Zig Version](https://img.shields.io/badge/zig-0.16.0--dev-orange?style=flat&logo=zig)](https://ziglang.org/)
