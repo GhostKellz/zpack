@@ -16,6 +16,8 @@ A fast compression library for Zig, providing multiple compression algorithms.
 - LZ77-based compression (fast, general-purpose)
 - Run-Length Encoding (RLE) for repetitive data
 - Simple API: `compress` and `decompress` functions
+- CLI tool for file operations
+- Comprehensive documentation ([DOCS.md](DOCS.md))
 
 ## Installation
 
