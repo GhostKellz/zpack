@@ -1,6 +1,6 @@
 # zpack
 
-![zpack logo](assets/icons/zpack.png)
+<img src="assets/icons/zpack.png" alt="zpack logo" width="150">
 
 [![Built with Zig](https://img.shields.io/badge/built%20with-Zig-yellow?style=flat&logo=zig)](https://ziglang.org/)
 [![Zig Version](https://img.shields.io/badge/zig-0.16.0--dev-orange?style=flat&logo=zig)](https://ziglang.org/)
@@ -14,6 +14,16 @@ A fast compression library for Zig, providing multiple compression algorithms.
 - LZ77-based compression (fast, general-purpose)
 - Run-Length Encoding (RLE) for repetitive data
 - Simple API: `compress` and `decompress` functions
+
+## Installation
+
+Add zpack to your Zig project:
+
+```bash
+zig fetch --save https://github.com/ghostkellz/zpack/archive/refs/heads/main.tar.gz
+```
+
+This will add the dependency to your `build.zig.zon` file.
 
 ## Usage
 
