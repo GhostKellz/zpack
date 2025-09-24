@@ -4,3 +4,6 @@
 *.exe
 TODO.md
 CLAUDE.md
+ROADMAP.md
+.zig-cache/
+
