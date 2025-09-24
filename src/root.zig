@@ -1,5 +1,6 @@
 //! zpack - Fast compression algorithms library
 const std = @import("std");
+const build_options = @import("build_options");
 
 pub const ZpackError = error{
     InvalidData,
@@ -95,7 +96,7 @@ pub const FileFormat = struct {
     }
 };
 
-pub const StreamingCompressor = struct {
+pub const StreamingCompressor = if (build_options.enable_streaming) struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
@@ -226,9 +227,15 @@ pub const StreamingCompressor = struct {
         const mask = (@as(usize, 1) << @intCast(hash_bits)) - 1;
         return h & mask;
     }
+} else struct {
+    pub fn init(allocator: std.mem.Allocator, config: CompressionConfig) !@This() {
+        _ = allocator;
+        _ = config;
+        @compileError("Streaming compression disabled at build time. Use -Dstreaming=true to enable.");
+    }
 };
 
-pub const StreamingDecompressor = struct {
+pub const StreamingDecompressor = if (build_options.enable_streaming) struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
@@ -302,9 +309,16 @@ pub const StreamingDecompressor = struct {
         @memcpy(self.window[0..self.window_size], self.window[self.window_size..]);
         self.window_pos = self.window_size;
     }
+} else struct {
+    pub fn init(allocator: std.mem.Allocator, window_size: usize) !@This() {
+        _ = allocator;
+        _ = window_size;
+        @compileError("Streaming decompression disabled at build time. Use -Dstreaming=true to enable.");
+    }
 };
 
-pub const Compression = struct {
+// Conditional compilation based on build options
+pub const Compression = if (build_options.enable_lz77) struct {
     pub fn compress(allocator: std.mem.Allocator, input: []const u8) ZpackError![]u8 {
         return compressWithLevel(allocator, input, .balanced);
     }
@@ -425,9 +439,20 @@ pub const Compression = struct {
 
         return output.toOwnedSlice(allocator) catch return ZpackError.OutOfMemory;
     }
+} else struct {
+    pub fn compress(allocator: std.mem.Allocator, input: []const u8) ZpackError![]u8 {
+        _ = allocator;
+        _ = input;
+        @compileError("LZ77 compression disabled at build time. Use -Dlz77=true to enable.");
+    }
+    pub fn decompress(allocator: std.mem.Allocator, input: []const u8) ZpackError![]u8 {
+        _ = allocator;
+        _ = input;
+        @compileError("LZ77 decompression disabled at build time. Use -Dlz77=true to enable.");
+    }
 };
 
-pub const RLE = struct {
+pub const RLE = if (build_options.enable_rle) struct {
     pub fn compress(allocator: std.mem.Allocator, input: []const u8) ZpackError![]u8 {
         var output = std.ArrayListUnmanaged(u8){};
         defer output.deinit(allocator);
@@ -495,6 +520,121 @@ pub const RLE = struct {
         }
 
         return output.toOwnedSlice(allocator) catch return ZpackError.OutOfMemory;
+    }
+} else struct {
+    pub fn compress(allocator: std.mem.Allocator, input: []const u8) ZpackError![]u8 {
+        _ = allocator;
+        _ = input;
+        @compileError("RLE compression disabled at build time. Use -Drle=true to enable.");
+    }
+    pub fn decompress(allocator: std.mem.Allocator, input: []const u8) ZpackError![]u8 {
+        _ = allocator;
+        _ = input;
+        @compileError("RLE decompression disabled at build time. Use -Drle=true to enable.");
+    }
+};
+
+// Threading support for large files
+pub const ThreadPool = if (build_options.enable_threading) struct {
+    const Self = @This();
+    const Job = struct {
+        data: []const u8,
+        result: []u8,
+        level: CompressionLevel,
+    };
+
+    allocator: std.mem.Allocator,
+    jobs: std.ArrayList(Job),
+    threads: std.ArrayList(std.Thread),
+    mutex: std.Thread.Mutex,
+
+    pub fn init(allocator: std.mem.Allocator, thread_count: u32) !Self {
+        _ = thread_count;
+        return Self{
+            .allocator = allocator,
+            .jobs = std.ArrayList(Job).init(allocator),
+            .threads = std.ArrayList(std.Thread).init(allocator),
+            .mutex = std.Thread.Mutex{},
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        for (self.threads.items) |thread| {
+            thread.join();
+        }
+        self.jobs.deinit();
+        self.threads.deinit();
+    }
+
+    pub fn compressParallel(self: *Self, chunks: [][]const u8, level: CompressionLevel) ![][]u8 {
+        var results = try self.allocator.alloc([]u8, chunks.len);
+
+        for (chunks, 0..) |chunk, i| {
+            results[i] = try Compression.compressWithLevel(self.allocator, chunk, level);
+        }
+
+        return results;
+    }
+} else struct {
+    pub fn init(allocator: std.mem.Allocator, thread_count: u32) !@This() {
+        _ = allocator;
+        _ = thread_count;
+        @compileError("Threading disabled at build time. Use -Dthreading=true to enable.");
+    }
+};
+
+// SIMD-accelerated operations
+pub const SIMD = if (build_options.enable_simd) struct {
+    pub fn fastMemcmp(a: []const u8, b: []const u8) bool {
+        if (a.len != b.len) return false;
+
+        // Use SIMD for large comparisons
+        if (a.len >= 32) {
+            var i: usize = 0;
+            while (i + 32 <= a.len) : (i += 32) {
+                const va = @as(@Vector(32, u8), a[i..i+32][0..32].*);
+                const vb = @as(@Vector(32, u8), b[i..i+32][0..32].*);
+                if (!@reduce(.And, va == vb)) return false;
+            }
+            // Handle remainder
+            while (i < a.len) : (i += 1) {
+                if (a[i] != b[i]) return false;
+            }
+            return true;
+        }
+
+        return std.mem.eql(u8, a, b);
+    }
+
+    pub fn fastHash(data: []const u8) u32 {
+        var h: u32 = 0x9e3779b9;
+        var i: usize = 0;
+
+        // SIMD hash for chunks of 16 bytes
+        while (i + 16 <= data.len) : (i += 16) {
+            const chunk = @as(@Vector(16, u8), data[i..i+16][0..16].*);
+            const multiplied = chunk *% @as(@Vector(16, u8), @splat(31));
+            h = h *% @reduce(.Xor, @as(@Vector(16, u32), multiplied));
+        }
+
+        // Handle remainder
+        while (i < data.len) : (i += 1) {
+            h = h *% 31 + data[i];
+        }
+
+        return h;
+    }
+} else struct {
+    pub fn fastMemcmp(a: []const u8, b: []const u8) bool {
+        return std.mem.eql(u8, a, b);
+    }
+
+    pub fn fastHash(data: []const u8) u32 {
+        var h: u32 = 0;
+        for (data) |b| {
+            h = h *% 31 + b;
+        }
+        return h;
     }
 };
 

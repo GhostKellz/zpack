@@ -471,7 +471,7 @@ test "checksum mismatch handling" {
 2. **Validate inputs early**: Check file size and headers before processing
 3. **Provide user-friendly error messages**: Don't just return error codes
 4. **Consider fallback strategies**: Streaming compression for memory issues
-5. **Log errors appropriately**: Help with debugging in production
+5. **Log errors appropriately**: Help with debugging in experimental/lab use
 6. **Test error conditions**: Include error cases in your test suite
 7. **Document error behavior**: Let users know what errors to expect
 

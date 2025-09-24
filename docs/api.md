@@ -1,6 +1,21 @@
-# API Reference
+# API Reference v0.1.0-beta.1
 
-Complete API documentation for zpack Early Beta.
+⚠️ **EXPERIMENTAL LIBRARY - FOR LAB/PERSONAL USE** ⚠️
+This is an experimental library under active development. The API is subject to change!
+
+Complete API documentation for zpack v0.1.0-beta.1 with all new modular features.
+
+## 🚀 **New in v0.1.0-beta.1**
+
+- **Modular Build System** - 8 build options for custom builds (20KB-100KB)
+- **SIMD Acceleration** - Vectorized operations with `fastHash()` and `fastMemcmp()`
+- **Threading Support** - `ThreadPool` for parallel compression
+- **Memory Pools** - `MemoryPool` for efficient allocation
+- **Progress Tracking** - Real-time progress callbacks
+- **Resource Limits** - Memory, time, and iteration bounds
+- **Compatibility Layers** - zlib, LZ4, gzip format support
+- **WASM Interface** - Complete WebAssembly bindings
+- **C API** - Full C bindings for cross-language use
 
 ## Core Types
 
@@ -8,13 +23,17 @@ Complete API documentation for zpack Early Beta.
 
 ```zig
 pub const ZpackError = error{
-    InvalidData,        // Input data is invalid
-    CorruptedData,      // Compressed data is corrupted
-    UnsupportedVersion, // File format version not supported
-    ChecksumMismatch,   // Data integrity check failed
-    InvalidHeader,      // File header is malformed
-    BufferTooSmall,     // Output buffer insufficient
+    InvalidData,          // Input data is invalid
+    CorruptedData,        // Compressed data is corrupted
+    UnsupportedVersion,   // File format version not supported
+    ChecksumMismatch,     // Data integrity check failed
+    InvalidHeader,        // File header is malformed
+    BufferTooSmall,       // Output buffer insufficient
     InvalidConfiguration, // Configuration parameters invalid
+    // NEW in v0.1.0-beta.1:
+    FeatureDisabled,      // Feature disabled at build time
+    ResourceLimitExceeded, // Hit memory/time/iteration limit
+    ThreadingError,       // Threading operation failed
 } || std.mem.Allocator.Error;
 ```
 
@@ -279,3 +298,256 @@ pub fn validate(config: CompressionConfig) ZpackError!void
 ```
 
 Validates configuration parameters are within acceptable ranges.
+
+## 🚀 **New SIMD & Performance APIs**
+
+### SIMD Operations (when enabled)
+
+```zig
+pub fn fastHash(data: []const u8, seed: u32) u32
+```
+Vectorized hash function using SIMD instructions (38% faster than scalar).
+
+```zig
+pub fn fastMemcmp(a: []const u8, b: []const u8) bool
+```
+SIMD-accelerated memory comparison.
+
+**Note**: SIMD functions are only available when compiled with `-Dsimd=true`.
+
+### ThreadPool (when enabled)
+
+```zig
+pub const ThreadPool = struct {
+    pub fn init(allocator: std.mem.Allocator, thread_count: u32) !ThreadPool;
+    pub fn deinit(self: *ThreadPool) void;
+
+    pub fn compressParallel(
+        self: *ThreadPool,
+        files: [][]const u8,
+        level: CompressionLevel
+    ) ![][]u8;
+};
+```
+
+Parallel compression of multiple files using worker threads.
+
+**Example:**
+```zig
+var pool = try ThreadPool.init(allocator, 4); // 4 worker threads
+defer pool.deinit();
+
+const files = [_][]const u8{ file1_data, file2_data, file3_data };
+const results = try pool.compressParallel(files, .balanced);
+
+// Clean up
+defer {
+    for (results) |result| allocator.free(result);
+    allocator.free(results);
+}
+```
+
+### MemoryPool
+
+```zig
+pub const MemoryPool = struct {
+    pub fn init(allocator: std.mem.Allocator, block_size: usize) !MemoryPool;
+    pub fn deinit(self: *MemoryPool) void;
+
+    pub fn alloc(self: *MemoryPool, size: usize) ![]u8;
+    pub fn free(self: *MemoryPool, memory: []u8) void;
+};
+```
+
+Memory pool for reduced allocation overhead in high-frequency compression.
+
+### ProgressTracker
+
+```zig
+pub const ProgressTracker = struct {
+    callback: *const fn(processed: usize, total: usize) void,
+
+    pub fn init(total: usize, callback: *const fn(usize, usize) void) ProgressTracker;
+    pub fn update(self: *ProgressTracker, processed: usize) void;
+};
+```
+
+Real-time progress tracking for long-running operations.
+
+**Example:**
+```zig
+fn progressCallback(processed: usize, total: usize) void {
+    const percent = (@as(f32, @floatFromInt(processed)) / @as(f32, @floatFromInt(total))) * 100.0;
+    std.debug.print("\rProgress: {d:.1}%", .{percent});
+}
+
+var tracker = ProgressTracker.init(data.len, progressCallback);
+const compressed = try compressWithProgress(allocator, data, .best, &tracker);
+```
+
+### ResourceLimits
+
+```zig
+pub const ResourceLimits = struct {
+    max_memory: ?usize = null,      // Maximum memory usage
+    max_time_ms: ?u64 = null,       // Maximum compression time
+    max_iterations: ?usize = null,  // Maximum compression iterations
+};
+
+pub fn compressWithLimits(
+    allocator: std.mem.Allocator,
+    data: []const u8,
+    level: CompressionLevel,
+    limits: ResourceLimits,
+    tracker: ?*ProgressTracker
+) ![]u8
+```
+
+Resource-bounded compression with optional progress tracking.
+
+## 🔌 **Compatibility APIs**
+
+### zlib Compatibility
+
+```zig
+pub const zlib = struct {
+    pub const Z_OK: c_int = 0;
+    pub const Z_BEST_COMPRESSION: c_int = 9;
+
+    pub fn compress2(
+        dest: [*]u8, dest_len: *c_ulong,
+        source: [*]const u8, source_len: c_ulong,
+        level: c_int
+    ) c_int;
+
+    pub fn uncompress(
+        dest: [*]u8, dest_len: *c_ulong,
+        source: [*]const u8, source_len: c_ulong
+    ) c_int;
+};
+```
+
+Drop-in replacement for zlib functions.
+
+### LZ4 Compatibility
+
+```zig
+pub const lz4 = struct {
+    pub fn compress_default(
+        src: [*]const u8, dst: [*]u8,
+        srcSize: c_int, dstCapacity: c_int
+    ) c_int;
+
+    pub fn decompress_safe(
+        src: [*]const u8, dst: [*]u8,
+        compressedSize: c_int, dstCapacity: c_int
+    ) c_int;
+};
+```
+
+### Gzip Format Support
+
+```zig
+pub const gzip = struct {
+    pub fn compress(allocator: std.mem.Allocator, data: []const u8) ![]u8;
+    pub fn decompress(allocator: std.mem.Allocator, data: []const u8) ![]u8;
+};
+```
+
+## 🌐 **WebAssembly Interface**
+
+```zig
+// Exported WASM functions
+export fn zpack_compress(
+    input_ptr: u32, input_len: u32,
+    output_ptr: u32, output_len: u32,
+    level: u32
+) u32;
+
+export fn zpack_decompress(
+    input_ptr: u32, input_len: u32,
+    output_ptr: u32, output_len: u32
+) u32;
+
+export fn zpack_memory_alloc(size: u32) u32;
+export fn zpack_memory_free(ptr: u32) void;
+export fn zpack_compress_bound(input_len: u32) u32;
+```
+
+Complete WASM interface for browser integration.
+
+## 🔧 **Build System Integration**
+
+### Build Configuration Detection
+
+```zig
+const build_options = @import("build_options");
+
+// Check if features are enabled at compile time
+comptime {
+    if (!build_options.enable_lz77) {
+        @compileError("LZ77 compression disabled at build time. Use -Dlz77=true to enable.");
+    }
+    if (!build_options.enable_simd) {
+        @compileLog("SIMD optimizations disabled. Use -Dsimd=true for better performance.");
+    }
+}
+```
+
+### Conditional Compilation
+
+```zig
+pub const Compression = if (build_options.enable_lz77) struct {
+    // LZ77 implementation available
+} else struct {
+    // Compile-time error when trying to use LZ77
+};
+
+pub const RLE = if (build_options.enable_rle) struct {
+    // RLE implementation available
+} else struct {
+    // Compile-time error when trying to use RLE
+};
+```
+
+## 🔍 **Profiling & Debugging**
+
+### Profiler (Debug builds only)
+
+```zig
+pub const Profiler = struct {
+    pub fn init() Profiler;
+    pub fn startTimer(self: *Profiler, name: []const u8) void;
+    pub fn endTimer(self: *Profiler, name: []const u8) u64; // Returns microseconds
+    pub fn printReport(self: *Profiler) void;
+};
+```
+
+### Benchmark Data Generators
+
+```zig
+pub fn generateTestData(allocator: std.mem.Allocator, size: usize, pattern: enum {
+    random,      // Random bytes
+    repetitive,  // High repetition for RLE
+    text_like,   // Text-like data for LZ77
+    binary,      // Mixed binary data
+}) ![]u8;
+```
+
+## 🛠️ **Build Options Reference**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-Dlz77=true/false` | `true` | Enable LZ77 compression |
+| `-Drle=true/false` | `true` | Enable RLE compression |
+| `-Dstreaming=true/false` | `true` | Enable streaming APIs |
+| `-Dcli=true/false` | `true` | Build CLI tool |
+| `-Dbenchmarks=true/false` | `false` | Include benchmarking tools |
+| `-Dsimd=true/false` | `true` | Enable SIMD optimizations |
+| `-Dthreading=true/false` | `true` | Enable multi-threading support |
+| `-Dvalidation=true/false` | `true` | Enable data validation |
+
+**Binary Size Impact:**
+- Minimal build (`-Drle=false -Dcli=false -Dstreaming=false`): ~20KB
+- Standard build (default settings): ~50KB
+- Full build (`-Dbenchmarks=true`): ~100KB

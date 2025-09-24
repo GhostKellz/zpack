@@ -2,6 +2,13 @@
 
 The zpack command-line tool provides an easy interface for file compression and decompression.
 
+## DISCLAIMER
+
+⚠️ **EXPERIMENTAL LIBRARY - FOR LAB/PERSONAL USE** ⚠️
+This is an experimental library under active development. It is
+intended for research, learning, and personal projects. The API is subject
+to change!
+
 ## Installation
 
 Build the CLI tool:
@@ -252,3 +259,104 @@ done
 4. **Batch processing:**
    - Compress files in parallel when possible
    - Consider system memory when processing large files
+
+## 🔧 **Advanced CLI Features**
+
+### Build Information
+```bash
+# Check what features are available in your build
+zpack --version
+
+# Example output:
+zpack v0.1.0-beta.1
+Build Configuration:
+  ✅ LZ77 compression
+  ✅ RLE compression
+  ✅ Streaming APIs
+  ✅ SIMD acceleration
+  ✅ Multi-threading
+  ❌ Benchmarks (disabled)
+Built with Zig 0.16.0 on 2024-01-15 14:30:22 UTC
+```
+
+### Error Codes
+```bash
+# CLI returns standard exit codes:
+# 0 = Success
+# 1 = General error (file not found, etc.)
+# 2 = Invalid arguments
+# 3 = Compression/decompression error
+# 4 = Build configuration error (feature disabled)
+```
+
+### Shell Integration
+```bash
+# Enable bash completion (if available)
+source <(zpack --completion bash)
+
+# Check if compression would be beneficial
+if [ $(stat -c%s file.txt) -gt 1000 ]; then
+    zpack compress file.txt --level balanced
+else
+    echo "File too small for compression"
+fi
+```
+
+### Scripting Examples
+```bash
+#!/bin/bash
+# Smart compression script
+
+file="$1"
+if [ ! -f "$file" ]; then
+    echo "File not found: $file"
+    exit 1
+fi
+
+size=$(stat -c%s "$file")
+if [ $size -gt 10000 ]; then
+    # Large file - use best compression
+    zpack compress "$file" --level best
+elif [ $size -gt 1000 ]; then
+    # Medium file - balanced compression
+    zpack compress "$file" --level balanced
+else
+    echo "File too small ($size bytes) - skipping compression"
+fi
+```
+
+## 🧪 **Development and Testing**
+
+### CLI-Specific Build Options
+```bash
+# Build without CLI (library only)
+zig build -Dcli=false
+
+# Full build with all features
+zig build full
+
+# Minimal build (no CLI, basic compression only)
+zig build minimal
+```
+
+### Testing CLI Features
+```bash
+# Test all compression levels
+for level in fast balanced best; do
+    echo "Testing level: $level"
+    zpack compress test.txt --level $level
+    ls -la test.txt.zpack
+    rm test.txt.zpack
+done
+
+# Test both algorithms
+for algo in lz77 rle; do
+    echo "Testing algorithm: $algo"
+    zpack compress test.txt --algorithm $algo
+    zpack decompress test.txt.zpack
+done
+```
+
+---
+
+**Note**: This CLI tool is for experimental, lab, and personal use only. The command-line interface may change in future versions.

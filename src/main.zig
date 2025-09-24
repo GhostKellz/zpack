@@ -9,12 +9,20 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    if (args.len < 3) {
-        std.debug.print("Usage: zpack <compress|decompress> <input_file> [output_file] [options]\n", .{});
-        std.debug.print("Options:\n", .{});
-        std.debug.print("  --level <fast|balanced|best>  Compression level (default: balanced)\n", .{});
-        std.debug.print("  --algorithm <lz77|rle>        Compression algorithm (default: lz77)\n", .{});
-        std.debug.print("  --no-header                   Skip file format header\n", .{});
+    if (args.len < 2) {
+        printUsage();
+        return;
+    }
+
+    // Handle special commands
+    if (std.mem.eql(u8, args[1], "--version") or std.mem.eql(u8, args[1], "-v")) {
+        std.debug.print("zpack version 0.1.0-beta.1\n", .{});
+        std.debug.print("Fast compression library for Zig\n", .{});
+        return;
+    }
+
+    if (std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "-h") or args.len < 3) {
+        printUsage();
         return;
     }
 
@@ -133,6 +141,28 @@ pub fn main() !void {
     } else {
         std.debug.print("Unknown command: {s}\n", .{command});
     }
+}
+
+fn printUsage() void {
+    std.debug.print("zpack v0.1.0-beta.1 - Fast compression library for Zig\n\n", .{});
+    std.debug.print("USAGE:\n", .{});
+    std.debug.print("    zpack <COMMAND> <INPUT_FILE> [OUTPUT_FILE] [OPTIONS]\n\n", .{});
+    std.debug.print("COMMANDS:\n", .{});
+    std.debug.print("    compress       Compress a file\n", .{});
+    std.debug.print("    decompress     Decompress a file\n", .{});
+    std.debug.print("    --version, -v  Show version information\n", .{});
+    std.debug.print("    --help, -h     Show this help message\n\n", .{});
+    std.debug.print("OPTIONS:\n", .{});
+    std.debug.print("    --level <LEVEL>        Compression level: fast, balanced, best (default: balanced)\n", .{});
+    std.debug.print("    --algorithm <ALGO>     Algorithm: lz77, rle (default: lz77)\n", .{});
+    std.debug.print("    --no-header           Skip file format header (raw compression)\n\n", .{});
+    std.debug.print("EXAMPLES:\n", .{});
+    std.debug.print("    zpack compress myfile.txt\n", .{});
+    std.debug.print("    zpack compress myfile.txt --level best\n", .{});
+    std.debug.print("    zpack compress data.log --algorithm rle\n", .{});
+    std.debug.print("    zpack decompress myfile.txt.zpack myfile.txt\n", .{});
+    std.debug.print("    zpack compress myfile.txt --no-header  # Raw compression\n\n", .{});
+    std.debug.print("For more information, visit: https://github.com/ghostkellz/zpack\n", .{});
 }
 
 test "simple test" {
