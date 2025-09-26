@@ -36,6 +36,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "enable_simd", config.enable_simd);
     options.addOption(bool, "enable_threading", config.enable_threading);
     options.addOption(bool, "enable_validation", config.enable_validation);
+    const options_module = options.createModule();
 
     // Print build configuration
     std.debug.print("\n=== zpack Build Configuration ===\n", .{});
@@ -54,7 +55,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .imports = &.{
-            .{ .name = "build_options", .module = options.createModule() },
+            .{ .name = "build_options", .module = options_module },
         },
     });
 
@@ -68,7 +69,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
                 .imports = &.{
                     .{ .name = "zpack", .module = mod },
-                    .{ .name = "build_options", .module = options.createModule() },
+                    .{ .name = "build_options", .module = options_module },
                 },
             }),
         });
@@ -96,7 +97,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
                 .imports = &.{
                     .{ .name = "zpack", .module = mod },
-                    .{ .name = "build_options", .module = options.createModule() },
+                    .{ .name = "build_options", .module = options_module },
                 },
             }),
         });
@@ -119,7 +120,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
                 .imports = &.{
                     .{ .name = "zpack", .module = mod },
-                    .{ .name = "build_options", .module = options.createModule() },
+                    .{ .name = "build_options", .module = options_module },
                 },
             }),
         });
@@ -146,7 +147,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
                 .imports = &.{
                     .{ .name = "zpack", .module = mod },
-                    .{ .name = "build_options", .module = options.createModule() },
+                    .{ .name = "build_options", .module = options_module },
                 },
             }),
         });

@@ -110,6 +110,26 @@ zig build run -- decompress file.dat --no-header
 
 **Note:** Files compressed with `--no-header` cannot use checksum validation or automatic algorithm detection.
 
+### --stream / --no-stream
+
+Stream compression and decompression one chunk at a time.
+
+```bash
+# Raw streaming compression (chunks written as soon as they are encoded)
+zig build run -- compress big.log --no-header --stream
+
+# Stream a raw file back to disk
+zig build run -- decompress big.log.lz77 --stream --no-header
+```
+
+**Streaming requirements & tips:**
+
+- Streaming currently supports the LZ77 algorithm only. If `--algorithm rle` is provided, the CLI silently falls back to buffered mode.
+- The streaming encoder emits raw compressed blocks. You must pass `--no-header` (or `--raw`) when using `--stream`, otherwise the CLI disables streaming automatically.
+- When decompressing streaming output, the CLI expects raw data as well. Pair `--stream` and `--no-header` for both directions.
+- Chunk size defaults to 64 KiB. For now this value is fixed in the CLI but can be tuned in library integrations.
+- Streaming is ideal for very large files, pipelines, or when you want to avoid buffering the entire payload in memory.
+
 ## Examples
 
 ### Text File Compression

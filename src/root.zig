@@ -96,16 +96,41 @@ pub const FileFormat = struct {
     }
 };
 
+fn UnderlyingType(comptime T: type) type {
+    return switch (@typeInfo(T)) {
+        .pointer => |ptr| UnderlyingType(ptr.child),
+        else => T,
+    };
+}
+
+fn WriterError(comptime T: type) type {
+    const Base = UnderlyingType(T);
+    return if (@hasDecl(Base, "Error")) Base.Error else error{};
+}
+
+fn ReaderError(comptime T: type) type {
+    const Base = UnderlyingType(T);
+    return if (@hasDecl(Base, "Error")) Base.Error else error{};
+}
+
+fn streamingHash(data: []const u8, hash_bits: u8) usize {
+    var h: u32 = 0;
+    for (data) |b| {
+        h = h *% 31 + b;
+    }
+    const mask = (@as(usize, 1) << @intCast(hash_bits)) - 1;
+    return h & mask;
+}
+
 pub const StreamingCompressor = if (build_options.enable_streaming) struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
     config: CompressionConfig,
     hash_table: []usize,
-    window: []u8,
-    window_pos: usize = 0,
-    window_size: usize,
-    total_input: usize = 0,
+    buffer: std.ArrayListUnmanaged(u8),
+    cursor: usize = 0,
+    base_pos: usize = 0,
 
     pub fn init(allocator: std.mem.Allocator, config: CompressionConfig) ZpackError!Self {
         try config.validate();
@@ -114,118 +139,140 @@ pub const StreamingCompressor = if (build_options.enable_streaming) struct {
         const hash_table = try allocator.alloc(usize, hash_table_size);
         @memset(hash_table, std.math.maxInt(usize));
 
-        const window = try allocator.alloc(u8, config.window_size * 2);
-
         return Self{
             .allocator = allocator,
             .config = config,
             .hash_table = hash_table,
-            .window = window,
-            .window_size = config.window_size,
+            .buffer = .{},
         };
     }
 
     pub fn deinit(self: *Self) void {
         self.allocator.free(self.hash_table);
-        self.allocator.free(self.window);
+        self.buffer.deinit(self.allocator);
     }
 
-    pub fn compress(self: *Self, input: []const u8, output: *std.ArrayListUnmanaged(u8)) ZpackError!void {
-        if (input.len == 0) return;
+    pub fn write(self: *Self, writer: anytype, chunk: []const u8) (ZpackError || WriterError(@TypeOf(writer)))!void {
+        if (chunk.len == 0) return;
+        try self.buffer.appendSlice(self.allocator, chunk);
+        try self.process(writer, false);
+        self.trimBuffer();
+    }
 
-        for (input) |byte| {
-            self.window[self.window_pos] = byte;
+    pub fn finish(self: *Self, writer: anytype) (ZpackError || WriterError(@TypeOf(writer)))!void {
+        try self.process(writer, true);
+        self.trimBuffer();
+        if (self.buffer.items.len == 0) return;
+        const limit = self.base_pos + self.buffer.items.len;
+        while (self.cursor < limit) {
+            const idx = self.cursor - self.base_pos;
+            try writer.writeAll(&.{ 0, self.buffer.items[idx] });
+            self.cursor += 1;
+        }
+        self.buffer.items.len = 0;
+    }
 
-            if (self.window_pos >= self.config.min_match - 1) {
-                const hash_start = if (self.window_pos >= self.config.min_match - 1)
-                    self.window_pos - (self.config.min_match - 1) else 0;
-                const hash_data = self.window[hash_start..self.window_pos + 1];
+    pub fn compressReader(self: *Self, writer: anytype, reader: anytype, chunk_size: usize) (ZpackError || WriterError(@TypeOf(writer)) || ReaderError(@TypeOf(reader)))!void {
+        var buf: [4096]u8 = undefined;
+        const size = if (chunk_size == 0) buf.len else @min(chunk_size, buf.len);
+        while (true) {
+            const read_bytes = reader.read(buf[0..size]) catch |err| switch (err) {
+                error.EndOfStream => 0,
+                else => return ZpackError.InvalidData,
+            };
+            if (read_bytes == 0) break;
+            try self.write(writer, buf[0..read_bytes]);
+        }
+        try self.finish(writer);
+    }
 
-                if (hash_data.len >= self.config.min_match) {
-                    const hash = hashFnConfig(hash_data[0..@min(4, hash_data.len)], self.config.hash_bits);
-                    const candidate = self.hash_table[hash];
-                    self.hash_table[hash] = hash_start;
+    fn process(self: *Self, writer: anytype, flush: bool) (ZpackError || WriterError(@TypeOf(writer)))!void {
+        if (self.buffer.items.len == 0) return;
+        const lookahead = if (flush or self.config.min_match <= 1) 0 else self.config.min_match - 1;
+        const buffer_end = self.base_pos + self.buffer.items.len;
+        const process_limit = if (buffer_end > lookahead) buffer_end - lookahead else buffer_end;
 
-                    var best_len: usize = 0;
-                    var best_offset: usize = 0;
+        while (self.cursor < process_limit) {
+            const idx = self.cursor - self.base_pos;
+            if (idx >= self.buffer.items.len) break;
+            const remaining = self.buffer.items.len - idx;
+            if (remaining == 0) break;
 
-                    if (candidate != std.math.maxInt(usize) and
-                        hash_start >= candidate and
-                        hash_start - candidate <= self.config.window_size) {
+            if (remaining >= self.config.min_match) {
+                const hash_len = @min(4, remaining);
+                const hash = streamingHash(self.buffer.items[idx .. idx + hash_len], self.config.hash_bits);
+                const candidate = self.hash_table[hash];
+                self.hash_table[hash] = self.cursor;
 
-                        const available_window = @min(self.window_pos - hash_start + 1, self.config.max_match);
-                        const match_len = self.findMatch(candidate, hash_start, available_window);
+                var best_len: usize = 0;
+                var best_offset: usize = 0;
 
-                        if (match_len >= self.config.min_match) {
-                            best_len = match_len;
-                            best_offset = hash_start - candidate;
-                        }
-                    }
-
-                    if (best_len >= self.config.min_match) {
-                        output.append(self.allocator, @intCast(best_len)) catch return ZpackError.OutOfMemory;
-                        output.append(self.allocator, @intCast(best_offset >> 8)) catch return ZpackError.OutOfMemory;
-                        output.append(self.allocator, @intCast(best_offset & 0xFF)) catch return ZpackError.OutOfMemory;
-
-                        var skip = best_len - 1;
-                        while (skip > 0 and self.window_pos + 1 < input.len) {
-                            self.window_pos += 1;
-                            if (self.window_pos >= self.window_size * 2) {
-                                self.slideWindow();
+                if (candidate != std.math.maxInt(usize) and self.cursor >= candidate and self.cursor - candidate <= self.config.window_size) {
+                    if (candidate >= self.base_pos) {
+                        const candidate_idx = candidate - self.base_pos;
+                        if (candidate_idx < self.buffer.items.len) {
+                            const max_len = @min(self.config.max_match, remaining);
+                            const match_len = self.matchLength(candidate_idx, idx, max_len);
+                            if (match_len >= self.config.min_match) {
+                                best_len = match_len;
+                                best_offset = self.cursor - candidate;
                             }
-                            skip -= 1;
                         }
-                    } else {
-                        output.append(self.allocator, 0) catch return ZpackError.OutOfMemory;
-                        output.append(self.allocator, byte) catch return ZpackError.OutOfMemory;
                     }
-                } else {
-                    output.append(self.allocator, 0) catch return ZpackError.OutOfMemory;
-                    output.append(self.allocator, byte) catch return ZpackError.OutOfMemory;
                 }
-            } else {
-                output.append(self.allocator, 0) catch return ZpackError.OutOfMemory;
-                output.append(self.allocator, byte) catch return ZpackError.OutOfMemory;
+
+                if (best_len >= self.config.min_match and best_offset <= 0xFFFF) {
+                    const len_byte: u8 = @intCast(best_len);
+                    const hi: u8 = @intCast((best_offset >> 8) & 0xFF);
+                    const lo: u8 = @intCast(best_offset & 0xFF);
+                    try writer.writeAll(&.{ len_byte, hi, lo });
+                    self.cursor += best_len;
+                    continue;
+                }
             }
 
-            self.window_pos += 1;
-            if (self.window_pos >= self.window_size * 2) {
-                self.slideWindow();
+            if (!flush and remaining < self.config.min_match) {
+                break;
             }
-        }
 
-        self.total_input += input.len;
-    }
-
-    fn slideWindow(self: *Self) void {
-        @memcpy(self.window[0..self.window_size], self.window[self.window_size..]);
-        self.window_pos = self.window_size;
-
-        for (self.hash_table) |*entry| {
-            if (entry.* != std.math.maxInt(usize) and entry.* >= self.window_size) {
-                entry.* -= self.window_size;
-            } else {
-                entry.* = std.math.maxInt(usize);
-            }
+            const literal = self.buffer.items[idx];
+            try writer.writeAll(&.{ 0, literal });
+            self.cursor += 1;
         }
     }
 
-    fn findMatch(self: *Self, pos1: usize, pos2: usize, max_len: usize) usize {
+    fn matchLength(self: *Self, candidate_idx: usize, current_idx: usize, max_len: usize) usize {
         var len: usize = 0;
-        while (len < max_len and pos1 + len < self.window_pos and pos2 + len <= self.window_pos and
-               self.window[pos1 + len] == self.window[pos2 + len]) {
-            len += 1;
+        while (len < max_len) : (len += 1) {
+            const cand = candidate_idx + len;
+            const cur = current_idx + len;
+            if (cand >= self.buffer.items.len or cur >= self.buffer.items.len) break;
+            if (self.buffer.items[cand] != self.buffer.items[cur]) break;
         }
         return len;
     }
 
-    fn hashFnConfig(data: []const u8, hash_bits: u8) usize {
-        var h: u32 = 0;
-        for (data) |b| {
-            h = h *% 31 + b;
+    fn trimBuffer(self: *Self) void {
+        if (self.cursor <= self.base_pos) return;
+        const window_start = if (self.cursor > self.config.window_size) self.cursor - self.config.window_size else self.base_pos;
+        if (window_start <= self.base_pos) return;
+
+        const drop = window_start - self.base_pos;
+        if (drop >= self.buffer.items.len) {
+            self.buffer.items.len = 0;
+            self.base_pos = window_start;
+        } else {
+            const remaining = self.buffer.items.len - drop;
+            std.mem.copyForwards(u8, self.buffer.items[0..remaining], self.buffer.items[drop..]);
+            self.buffer.items.len = remaining;
+            self.base_pos = window_start;
         }
-        const mask = (@as(usize, 1) << @intCast(hash_bits)) - 1;
-        return h & mask;
+
+        for (self.hash_table) |*entry| {
+            if (entry.* != std.math.maxInt(usize) and entry.* < self.base_pos) {
+                entry.* = std.math.maxInt(usize);
+            }
+        }
     }
 } else struct {
     pub fn init(allocator: std.mem.Allocator, config: CompressionConfig) !@This() {
@@ -239,81 +286,162 @@ pub const StreamingDecompressor = if (build_options.enable_streaming) struct {
     const Self = @This();
 
     allocator: std.mem.Allocator,
-    window: []u8,
-    window_pos: usize = 0,
     window_size: usize,
+    window: std.ArrayListUnmanaged(u8),
+    input_buffer: std.ArrayListUnmanaged(u8),
 
     pub fn init(allocator: std.mem.Allocator, window_size: usize) ZpackError!Self {
-        const window = try allocator.alloc(u8, window_size * 2);
-
         return Self{
             .allocator = allocator,
-            .window = window,
             .window_size = window_size,
+            .window = .{},
+            .input_buffer = .{},
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.allocator.free(self.window);
+        self.window.deinit(self.allocator);
+        self.input_buffer.deinit(self.allocator);
     }
 
-    pub fn decompress(self: *Self, input: []const u8, output: *std.ArrayListUnmanaged(u8)) ZpackError!void {
-        var i: usize = 0;
-        while (i < input.len) {
-            if (i >= input.len) return ZpackError.InvalidData;
-            const token = input[i];
-            i += 1;
+    pub fn write(self: *Self, writer: anytype, chunk: []const u8) (ZpackError || WriterError(@TypeOf(writer)))!void {
+        try self.input_buffer.appendSlice(self.allocator, chunk);
+        try self.process(writer, false);
+    }
 
-            if (token == 0) {
-                if (i >= input.len) return ZpackError.InvalidData;
-                const byte = input[i];
-                i += 1;
-
-                output.append(self.allocator, byte) catch return ZpackError.OutOfMemory;
-                self.window[self.window_pos] = byte;
-                self.window_pos += 1;
-
-                if (self.window_pos >= self.window_size * 2) {
-                    self.slideWindow();
-                }
-            } else {
-                const length = token;
-                if (i + 1 >= input.len) return ZpackError.InvalidData;
-                const offset_high = input[i];
-                i += 1;
-                const offset_low = input[i];
-                i += 1;
-                const offset = (@as(usize, offset_high) << 8) | offset_low;
-
-                if (offset > self.window_pos) return ZpackError.CorruptedData;
-                const start = self.window_pos - offset;
-
-                var j: usize = 0;
-                while (j < length) {
-                    if (start + j >= self.window_pos) return ZpackError.CorruptedData;
-                    const byte = self.window[start + j];
-                    output.append(self.allocator, byte) catch return ZpackError.OutOfMemory;
-                    self.window[self.window_pos] = byte;
-                    self.window_pos += 1;
-
-                    if (self.window_pos >= self.window_size * 2) {
-                        self.slideWindow();
-                    }
-                    j += 1;
-                }
-            }
+    pub fn finish(self: *Self, writer: anytype) (ZpackError || WriterError(@TypeOf(writer)))!void {
+        try self.process(writer, true);
+        if (self.input_buffer.items.len != 0) {
+            return ZpackError.InvalidData;
         }
     }
 
-    fn slideWindow(self: *Self) void {
-        @memcpy(self.window[0..self.window_size], self.window[self.window_size..]);
-        self.window_pos = self.window_size;
+    pub fn decompressReader(self: *Self, writer: anytype, reader: anytype, chunk_size: usize) (ZpackError || WriterError(@TypeOf(writer)) || ReaderError(@TypeOf(reader)))!void {
+        var buf: [4096]u8 = undefined;
+        const size = if (chunk_size == 0) buf.len else @min(chunk_size, buf.len);
+        while (true) {
+            const read_bytes = reader.read(buf[0..size]) catch |err| switch (err) {
+                error.EndOfStream => 0,
+                else => return ZpackError.InvalidData,
+            };
+            if (read_bytes == 0) break;
+            try self.write(writer, buf[0..read_bytes]);
+        }
+        try self.finish(writer);
+    }
+
+    fn process(self: *Self, writer: anytype, flush: bool) (ZpackError || WriterError(@TypeOf(writer)))!void {
+        var index: usize = 0;
+        while (index < self.input_buffer.items.len) {
+            const token = self.input_buffer.items[index];
+            if (token == 0) {
+                if (index + 1 >= self.input_buffer.items.len) {
+                    if (!flush) break;
+                    return ZpackError.InvalidData;
+                }
+                const byte = self.input_buffer.items[index + 1];
+                try self.emitByte(writer, byte);
+                self.trimWindow();
+                index += 2;
+            } else {
+                if (index + 2 >= self.input_buffer.items.len) {
+                    if (!flush) break;
+                    return ZpackError.InvalidData;
+                }
+                const offset_high = self.input_buffer.items[index + 1];
+                const offset_low = self.input_buffer.items[index + 2];
+                const offset = (@as(usize, offset_high) << 8) | offset_low;
+                if (offset == 0 or offset > self.window.items.len) {
+                    return ZpackError.CorruptedData;
+                }
+                const start = self.window.items.len - offset;
+                const length = token;
+
+                var j: usize = 0;
+                while (j < length) : (j += 1) {
+                    if (start + j >= self.window.items.len) {
+                        return ZpackError.CorruptedData;
+                    }
+                    const byte = self.window.items[start + j];
+                    try self.emitByte(writer, byte);
+                }
+                self.trimWindow();
+                index += 3;
+            }
+        }
+
+        if (index > 0) {
+            const remaining = self.input_buffer.items.len - index;
+            if (remaining > 0) {
+                std.mem.copyForwards(u8, self.input_buffer.items[0..remaining], self.input_buffer.items[index..]);
+            }
+            self.input_buffer.items.len = remaining;
+        }
+    }
+
+    fn emitByte(self: *Self, writer: anytype, byte: u8) (ZpackError || WriterError(@TypeOf(writer)))!void {
+        try writer.writeAll(&.{byte});
+        self.window.append(self.allocator, byte) catch return ZpackError.OutOfMemory;
+    }
+
+    fn trimWindow(self: *Self) void {
+        if (self.window.items.len <= self.window_size) return;
+        const drop = self.window.items.len - self.window_size;
+        std.mem.copyForwards(u8, self.window.items[0..self.window_size], self.window.items[drop..]);
+        self.window.items.len = self.window_size;
     }
 } else struct {
     pub fn init(allocator: std.mem.Allocator, window_size: usize) !@This() {
         _ = allocator;
         _ = window_size;
         @compileError("Streaming decompression disabled at build time. Use -Dstreaming=true to enable.");
+    }
+};
+
+pub fn compressStream(allocator: std.mem.Allocator, reader: anytype, writer: anytype, level: CompressionLevel, chunk_size: usize) (ZpackError || WriterError(@TypeOf(writer)) || ReaderError(@TypeOf(reader)))!void {
+    if (!build_options.enable_streaming) {
+        @compileError("Streaming compression disabled at build time. Use -Dstreaming=true to enable.");
+    }
+    var compressor = try StreamingCompressor.init(allocator, level.getConfig());
+    defer compressor.deinit();
+    try compressor.compressReader(writer, reader, chunk_size);
+}
+
+pub fn decompressStream(allocator: std.mem.Allocator, reader: anytype, writer: anytype, window_size: usize, chunk_size: usize) (ZpackError || WriterError(@TypeOf(writer)) || ReaderError(@TypeOf(reader)))!void {
+    if (!build_options.enable_streaming) {
+        @compileError("Streaming decompression disabled at build time. Use -Dstreaming=true to enable.");
+    }
+    const effective_window = if (window_size == 0)
+        CompressionLevel.balanced.getConfig().window_size
+    else
+        window_size;
+    var decompressor = try StreamingDecompressor.init(allocator, effective_window);
+    defer decompressor.deinit();
+    try decompressor.decompressReader(writer, reader, chunk_size);
+}
+
+const TestArrayListWriter = struct {
+    list: *std.ArrayListUnmanaged(u8),
+    allocator: std.mem.Allocator,
+    pub const Error = std.mem.Allocator.Error;
+
+    pub fn writeAll(self: *const @This(), data: []const u8) Error!void {
+        try self.list.appendSlice(self.allocator, data);
+    }
+};
+
+const TestSliceReader = struct {
+    data: []const u8,
+    index: usize = 0,
+    pub const Error = error{};
+
+    pub fn read(self: *TestSliceReader, dest: []u8) Error!usize {
+        const remaining = self.data.len - self.index;
+        if (remaining == 0) return 0;
+        const count = @min(dest.len, remaining);
+        std.mem.copyForwards(u8, dest[0..count], self.data[self.index .. self.index + count]);
+        self.index += count;
+        return count;
     }
 };
 
@@ -592,8 +720,8 @@ pub const SIMD = if (build_options.enable_simd) struct {
         if (a.len >= 32) {
             var i: usize = 0;
             while (i + 32 <= a.len) : (i += 32) {
-                const va = @as(@Vector(32, u8), a[i..i+32][0..32].*);
-                const vb = @as(@Vector(32, u8), b[i..i+32][0..32].*);
+                const va = @as(@Vector(32, u8), a[i .. i + 32][0..32].*);
+                const vb = @as(@Vector(32, u8), b[i .. i + 32][0..32].*);
                 if (!@reduce(.And, va == vb)) return false;
             }
             // Handle remainder
@@ -612,7 +740,7 @@ pub const SIMD = if (build_options.enable_simd) struct {
 
         // SIMD hash for chunks of 16 bytes
         while (i + 16 <= data.len) : (i += 16) {
-            const chunk = @as(@Vector(16, u8), data[i..i+16][0..16].*);
+            const chunk = @as(@Vector(16, u8), data[i .. i + 16][0..16].*);
             const multiplied = chunk *% @as(@Vector(16, u8), @splat(31));
             h = h *% @reduce(.Xor, @as(@Vector(16, u32), multiplied));
         }
@@ -789,15 +917,62 @@ test "compression levels" {
     try std.testing.expectEqualSlices(u8, input, decompressed_best);
 }
 
-// Streaming compression test disabled temporarily due to complexity
-// test "streaming compression" {
-//     const allocator = std.testing.allocator;
-//     const input = "hello world streaming compression test";
-//
-//     var compressor = try StreamingCompressor.init(allocator, CompressionLevel.balanced.getConfig());
-//     defer compressor.deinit();
-//
-//     var output = std.ArrayListUnmanaged(u8){};
+test "streaming compressor and decompressor" {
+    if (!build_options.enable_streaming) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    const input = "streaming compression test data that spans multiple chunks";
+
+    var compressor = try StreamingCompressor.init(allocator, CompressionLevel.balanced.getConfig());
+    defer compressor.deinit();
+
+    var encoded_buffer = std.ArrayListUnmanaged(u8){};
+    defer encoded_buffer.deinit(allocator);
+
+    var encoder_writer = TestArrayListWriter{ .list = &encoded_buffer, .allocator = allocator };
+
+    try compressor.write(&encoder_writer, input[0..15]);
+    try compressor.write(&encoder_writer, input[15..30]);
+    try compressor.write(&encoder_writer, input[30..]);
+    try compressor.finish(&encoder_writer);
+
+    var decompressor = try StreamingDecompressor.init(allocator, CompressionLevel.balanced.getConfig().window_size);
+    defer decompressor.deinit();
+
+    var decoded_buffer = std.ArrayListUnmanaged(u8){};
+    defer decoded_buffer.deinit(allocator);
+
+    var decoder_writer = TestArrayListWriter{ .list = &decoded_buffer, .allocator = allocator };
+
+    try decompressor.write(&decoder_writer, encoded_buffer.items[0..10]);
+    try decompressor.write(&decoder_writer, encoded_buffer.items[10..]);
+    try decompressor.finish(&decoder_writer);
+
+    try std.testing.expectEqualSlices(u8, input, decoded_buffer.items);
+}
+
+test "streaming convenience functions" {
+    if (!build_options.enable_streaming) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    const input = "chunked streaming convenience API validation";
+
+    var compressed = std.ArrayListUnmanaged(u8){};
+    defer compressed.deinit(allocator);
+    var compressed_writer = TestArrayListWriter{ .list = &compressed, .allocator = allocator };
+
+    var input_reader = TestSliceReader{ .data = input };
+    try compressStream(allocator, &input_reader, &compressed_writer, .balanced, 12);
+
+    var decoded = std.ArrayListUnmanaged(u8){};
+    defer decoded.deinit(allocator);
+    var decoded_writer = TestArrayListWriter{ .list = &decoded, .allocator = allocator };
+
+    var compressed_reader = TestSliceReader{ .data = compressed.items }; // reading compressed data
+    try decompressStream(allocator, &compressed_reader, &decoded_writer, 0, 16);
+
+    try std.testing.expectEqualSlices(u8, input, decoded.items);
+}
 //     defer output.deinit(allocator);
 //
 //     try compressor.compress(input, &output);

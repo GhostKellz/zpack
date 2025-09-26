@@ -1,87 +1,157 @@
 # zpack Documentation
 
-**⚠️ This documentation has been moved to the `docs/` directory for better organization.**
+## Overview
 
-For comprehensive documentation, please see:
+zpack is a fast compression library for Zig that provides multiple compression algorithms with a simple API. It's designed to be lightweight, efficient, and easy to integrate into Zig projects.
 
-## 📚 Complete Documentation
+## API Reference
 
-- **[📖 Main Documentation](docs/README.md)** - Start here for overview and links to all guides
-- **[⚡ Quick Start](docs/zig-integration.md)** - Get up and running with Zig integration
-- **[📋 API Reference](docs/api.md)** - Complete API documentation
-- **[🖥️ CLI Guide](docs/cli.md)** - Command-line tool usage
+### Compression Module
 
-## 🚀 Quick Start
+The `Compression` struct provides LZ77-inspired fast compression.
 
-Add zpack to your project:
+#### `compress(allocator: std.mem.Allocator, input: []const u8) ![]u8`
+
+Compresses the input data using LZ77 with hash-based matching.
+
+- **Parameters:**
+  - `allocator`: Memory allocator for output buffer
+  - `input`: Data to compress
+- **Returns:** Compressed data as a slice owned by the allocator
+- **Errors:** Allocation failures or invalid input
+
+#### `decompress(allocator: std.mem.Allocator, input: []const u8) ![]u8`
+
+Decompresses LZ77-compressed data.
+
+- **Parameters:**
+  - `allocator`: Memory allocator for output buffer
+  - `input`: Compressed data
+- **Returns:** Decompressed data as a slice owned by the allocator
+- **Errors:** Allocation failures, corrupted data, or invalid format
+
+### RLE Module
+
+The `RLE` struct provides Run-Length Encoding for data with repetitive sequences.
+
+#### `compress(allocator: std.mem.Allocator, input: []const u8) ![]u8`
+
+Compresses data using Run-Length Encoding.
+
+- **Parameters:**
+  - `allocator`: Memory allocator for output buffer
+  - `input`: Data to compress
+- **Returns:** RLE-compressed data
+- **Notes:** Only encodes runs of 3 or more identical bytes
+
+#### `decompress(allocator: std.mem.Allocator, input: []const u8) ![]u8`
+
+Decompresses RLE-compressed data.
+
+- **Parameters:**
+  - `allocator`: Memory allocator for output buffer
+  - `input`: RLE-compressed data
+- **Returns:** Decompressed data
+
+## Algorithm Details
+
+### LZ77 Compression
+
+zpack's LZ77 implementation uses:
+- **Window size:** 64KB sliding window
+- **Hash table:** 16-bit hashes for fast lookups
+- **Match length:** Minimum 4 bytes, maximum 255 bytes
+- **Encoding:** Token-based with literals and match references
+
+**Format:**
+- Literal: `0` + byte
+- Match: length (1-255) + offset_high + offset_low
+
+### RLE Compression
+
+Run-Length Encoding compresses sequences of identical bytes.
+
+**Format:**
+- Literal run: `0` + count (u8) + bytes
+- Encoded run: `1` + byte + count (u8)
+
+## CLI Tool
+
+The CLI provides command-line compression/decompression.
+
+### Commands
+
+#### `compress <input> [output]`
+
+Compresses a file. Output defaults to `input.zpack`.
+
+#### `decompress <input> [output]`
+
+Decompresses a file. Output defaults to `input` without `.zpack` extension.
+
+### Examples
 
 ```bash
-zig fetch --save https://github.com/ghostkellz/zpack/archive/refs/heads/main.tar.gz
+# Compress a file
+zig build run -- compress data.txt
+
+# Decompress a file
+zig build run -- decompress data.txt.zpack data.txt
 ```
 
-Use in your code:
-
-```zig
-const zpack = @import("zpack");
-
-// Simple compression with file format and checksum validation
-const compressed = try zpack.compressFile(allocator, input, .balanced);
-defer allocator.free(compressed);
-
-const decompressed = try zpack.decompressFile(allocator, compressed);
-defer allocator.free(decompressed);
-```
-
-## 🆕 Early Beta Features
-
-- ✅ **Multiple Compression Levels** - Fast, Balanced, Best
-- ✅ **Professional File Format** - Headers with checksums and metadata
-- ✅ **Streaming Compression** - Handle large files efficiently
-- ✅ **Comprehensive Error Handling** - Detailed error types and recovery
-- ✅ **Performance Benchmarks** - Built-in performance testing tools
-- ✅ **Configurable Parameters** - Tune compression for your use case
-
-## 📖 Documentation Index
-
-| Guide | Description |
-|-------|-------------|
-| [Integration Guide](docs/zig-integration.md) | How to add zpack to your Zig project |
-| [API Reference](docs/api.md) | Complete function and type documentation |
-| [CLI Guide](docs/cli.md) | Command-line tool usage and options |
-| [Compression Levels](docs/compression-levels.md) | Choose the right level for your needs |
-| [File Format](docs/file-format.md) | Technical specification of .zpack format |
-| [Error Handling](docs/error-handling.md) | Comprehensive error handling patterns |
-
-## 🏃‍♂️ Quick Examples
+## Usage Examples
 
 ### Basic Compression
-```zig
-// Default balanced compression
-const compressed = try zpack.Compression.compress(allocator, data);
 
-// With specific level
-const best_compressed = try zpack.Compression.compressWithLevel(allocator, data, .best);
+```zig
+const std = @import("std");
+const zpack = @import("zpack");
+
+pub fn main() !void {
+    const allocator = std.heap.page_allocator;
+    const input = "Hello, world! This is test data.";
+
+    const compressed = try zpack.Compression.compress(allocator, input);
+    defer allocator.free(compressed);
+
+    const decompressed = try zpack.Compression.decompress(allocator, compressed);
+    defer allocator.free(decompressed);
+
+    std.debug.print("Original: {s}\n", .{input});
+    std.debug.print("Compressed size: {}\n", .{compressed.len});
+    std.debug.print("Decompressed: {s}\n", .{decompressed});
+}
 ```
 
-### File Format with Validation
-```zig
-// Creates .zpack file with headers and checksum
-const zpack_file = try zpack.compressFile(allocator, data, .balanced);
+### Choosing Algorithms
 
-// Automatically validates integrity
-const original = try zpack.decompressFile(allocator, zpack_file);
+```zig
+// For repetitive data, use RLE
+const rle_compressed = try zpack.RLE.compress(allocator, repetitive_data);
+
+// For general data, use LZ77
+const lz77_compressed = try zpack.Compression.compress(allocator, general_data);
 ```
 
-### CLI Usage
+## Performance Notes
+
+- **LZ77:** Best for general-purpose compression, fast with good ratios on structured data
+- **RLE:** Excellent for data with long runs of identical bytes (e.g., images, binary data)
+- **Memory usage:** Both algorithms are memory-efficient, using bounded buffers
+- **Speed:** Optimized for fast compression/decompression with minimal overhead
+
+## Error Handling
+
+All functions return errors that should be handled appropriately:
+- `error.OutOfMemory`: Allocation failures
+- `error.InvalidData`: Corrupted or invalid compressed data
+
+## Testing
+
+Run the test suite:
+
 ```bash
-# Compress with best ratio
-zig build run -- compress file.txt --level best
-
-# Use RLE for repetitive data
-zig build run -- compress pattern.dat --algorithm rle
-
-# Performance benchmarks
-zig build benchmark
+zig build test
 ```
 
-For detailed documentation, examples, and guides, visit the **[docs/ directory](docs/README.md)**.
+Tests cover roundtrip compression, edge cases, and algorithm correctness.
