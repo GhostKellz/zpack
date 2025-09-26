@@ -4,6 +4,8 @@
 
 zpack is a fast compression library for Zig that provides multiple compression algorithms with a simple API. It's designed to be lightweight, efficient, and easy to integrate into Zig projects.
 
+> **Release track:** `v0.3.0-rc.1` (beta stabilization). Feature work for 0.3 is complete and the project is polishing for a 1.0 release.
+
 ## API Reference
 
 ### Compression Module
@@ -77,7 +79,7 @@ Run-Length Encoding compresses sequences of identical bytes.
 
 ## CLI Tool
 
-The CLI provides command-line compression/decompression.
+The CLI provides command-line compression/decompression with streaming, raw mode, and benchmarking hooks.
 
 ### Commands
 

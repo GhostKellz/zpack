@@ -1,4 +1,19 @@
 # Changelog
+# Changelog
+
+## 0.3.0-rc.1 – 2025-09-26
+
+### Added
+- Benchmarks now cover zpack’s LZ77/RLE codecs and the zlib reference backend via `zig build benchmark -Dbenchmarks=true`.
+- Fuzzing (`zig build fuzz`) and profiling (`zig build profile`) executables promoted to the default developer toolchain.
+- Documentation refresh covering release roadmap progress, streaming workflows, and new troubleshooting guidance for system `libz` deployments.
+
+### Changed
+- CLI version string bumped to `0.3.0-rc.1` to reflect the beta stabilization track.
+- README updated with release candidate highlights and instructions for selecting the bundled *miniz* or the host `libz`.
+
+### Fixed
+- Linked libc unconditionally when opting into the system `libz`, resolving segmentation faults in the zlib reference benchmarks on Linux distributions that lazily resolve PLT entries.
 
 ## 0.2.0-alpha – 2025-09-26
 

@@ -2,12 +2,11 @@
 
 The zpack command-line tool provides an easy interface for file compression and decompression.
 
-## DISCLAIMER
+## STATUS
 
-⚠️ **EXPERIMENTAL LIBRARY - FOR LAB/PERSONAL USE** ⚠️
-This is an experimental library under active development. It is
-intended for research, learning, and personal projects. The API is subject
-to change!
+ℹ️ **Release Candidate – v0.3.0-rc.1**
+
+The CLI is feature complete for the 0.3 beta cycle and currently stabilizing for a production-ready 1.0. The API remains pre-1.0 and may evolve based on feedback, but breaking changes will be highlighted in release notes.
 
 ## Installation
 
@@ -129,6 +128,23 @@ zig build run -- decompress big.log.lz77 --stream --no-header
 - When decompressing streaming output, the CLI expects raw data as well. Pair `--stream` and `--no-header` for both directions.
 - Chunk size defaults to 64 KiB. For now this value is fixed in the CLI but can be tuned in library integrations.
 - Streaming is ideal for very large files, pipelines, or when you want to avoid buffering the entire payload in memory.
+
+### --version
+
+Print the CLI version and exit. Helpful for scripting and verifying the active release candidate.
+
+```bash
+zig build run -- --version
+# zpack 0.3.0-rc.1
+```
+
+### --help
+
+Display usage information, including the latest streaming notes and build flag hints.
+
+```bash
+zig build run -- --help
+```
 
 ## Examples
 

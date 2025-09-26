@@ -64,6 +64,19 @@ zig build -Dthreading=true
 # Process data sequentially instead
 ```
 
+### **Segmentation fault when using system libz**
+
+**Problem:** Running the benchmark or zlib reference path with `-Duse_system_zlib=true` crashes with `Segmentation fault at address 0x0`.
+
+**Solution:**
+
+1. Upgrade to zpack `v0.3.0-rc.1` or later. The build now links `libc` automatically whenever the system `libz` backend is enabled, fixing the null PLT resolution.
+2. If you maintain a custom build script, ensure the executable links against both `libz` **and** `libc`:
+   ```bash
+   zig build-exe src/benchmark.zig -Duse_system_zlib=true -lc -lz
+   ```
+3. To force eager symbol resolution during debugging, run the benchmark with `LD_BIND_NOW=1 zig build benchmark -Duse_system_zlib=true -Dbenchmarks=true` to highlight missing symbols early.
+
 ### **Build System Issues**
 
 **Problem:** `error: no field or member function named 'addStaticLibrary'`

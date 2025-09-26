@@ -3,7 +3,7 @@ const posix = std.posix;
 const zpack = @import("zpack");
 const build_options = @import("build_options");
 
-const VERSION = "0.2.0-alpha";
+const VERSION = "0.3.0-rc.1";
 const STREAM_CHUNK_SIZE: usize = 64 * 1024;
 const log = std.log.scoped(.zpack_cli);
 

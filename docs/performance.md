@@ -2,6 +2,8 @@
 
 > **Achieve 299+ MB/s compression with SIMD, threading, and advanced optimization techniques**
 
+> Benchmarks last refreshed: **v0.3.0-rc.1** (Zig 0.16.0-dev) with both bundled *miniz* and system `libz` backends validated.
+
 This guide covers all aspects of zpack performance optimization, from build configurations to runtime tuning. Whether you need maximum speed, best compression ratios, or minimal memory usage, this guide will help you achieve your goals.
 
 ## 🚀 **Quick Performance Wins**

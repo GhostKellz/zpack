@@ -61,6 +61,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "build_options", .module = options_module },
         },
     });
+    mod.link_libc = true;
     if (!config.use_system_zlib) {
         mod.addIncludePath(b.path("deps"));
         const miniz_flags = &[_][]const u8{
@@ -72,7 +73,6 @@ pub fn build(b: *std.Build) void {
         mod.addCSourceFile(.{ .file = b.path("deps/miniz.c"), .flags = miniz_flags });
         mod.addCSourceFile(.{ .file = b.path("deps/miniz_tdef.c"), .flags = miniz_flags });
         mod.addCSourceFile(.{ .file = b.path("deps/miniz_tinfl.c"), .flags = miniz_flags });
-        mod.link_libc = true;
     }
 
     // CLI executable (optional)
@@ -87,7 +87,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "zpack", .module = mod },
                     .{ .name = "build_options", .module = options_module },
                 },
-                .link_libc = !config.use_system_zlib,
+                .link_libc = true,
             }),
         });
 
@@ -118,7 +118,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zpack", .module = mod },
                 .{ .name = "build_options", .module = options_module },
             },
-            .link_libc = !config.use_system_zlib,
+            .link_libc = true,
         });
         if (!config.use_system_zlib) {
             benchmark_root.addIncludePath(b.path("deps"));
@@ -149,7 +149,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zpack", .module = mod },
             .{ .name = "build_options", .module = options_module },
         },
-        .link_libc = !config.use_system_zlib,
+        .link_libc = true,
     });
     if (!config.use_system_zlib) {
         fuzz_root.addIncludePath(b.path("deps"));
@@ -185,6 +185,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "zpack", .module = mod },
                     .{ .name = "build_options", .module = options_module },
                 },
+                .link_libc = true,
             }),
         });
 
@@ -218,6 +219,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zpack", .module = mod },
                 .{ .name = "build_options", .module = options_module },
             },
+            .link_libc = true,
         });
         if (!config.use_system_zlib) {
             exe_root.addIncludePath(b.path("deps"));
