@@ -102,12 +102,37 @@ pub fn build(b: *std.Build) void {
             }),
         });
 
+        benchmark.linkSystemLibrary("z");
+
         b.installArtifact(benchmark);
 
         const benchmark_step = b.step("benchmark", "Run performance benchmarks");
         const benchmark_run = b.addRunArtifact(benchmark);
         benchmark_step.dependOn(&benchmark_run.step);
         benchmark_run.step.dependOn(b.getInstallStep());
+    }
+
+    const fuzz = b.addExecutable(.{
+        .name = "zpack-fuzz",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/fuzz.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zpack", .module = mod },
+                .{ .name = "build_options", .module = options_module },
+            },
+        }),
+    });
+
+    b.installArtifact(fuzz);
+
+    const fuzz_step = b.step("fuzz", "Run fuzz harness against core codecs");
+    const fuzz_run = b.addRunArtifact(fuzz);
+    fuzz_step.dependOn(&fuzz_run.step);
+    fuzz_run.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        fuzz_run.addArgs(args);
     }
 
     // Profiling executable (debug builds)

@@ -9,7 +9,7 @@ to change!
 
 Welcome to the comprehensive documentation for **zpack**, the next-generation compression library designed specifically for the Zig ecosystem. This documentation covers everything from basic usage to advanced enterprise features.
 
-## 🚀 **What's New in v0.1.0-beta.1**
+## 🚀 **What's New in v0.1.0**
 
 - ✅ **Modular Build System** - 8 build options, 3 presets, conditional compilation
 - ✅ **SIMD Acceleration** - Vectorized operations for maximum performance
