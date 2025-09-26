@@ -135,7 +135,7 @@ pub const StreamingCompressor = if (build_options.enable_streaming) struct {
     fn reserveBuffer(self: *Self, additional: usize) !void {
         const needed = self.buffer.items.len + additional;
         if (needed <= self.buffer.capacity) return;
-    var new_cap = if (self.buffer.capacity == 0) std.math.ceilPowerOfTwo(usize, needed) catch needed else self.buffer.capacity * 2;
+        var new_cap = if (self.buffer.capacity == 0) std.math.ceilPowerOfTwo(usize, needed) catch needed else self.buffer.capacity * 2;
         if (new_cap < needed) new_cap = needed;
         try self.buffer.ensureTotalCapacity(self.allocator, new_cap);
     }
@@ -302,7 +302,7 @@ pub const StreamingDecompressor = if (build_options.enable_streaming) struct {
     fn reserveInput(self: *Self, additional: usize) !void {
         const needed = self.input_buffer.items.len + additional;
         if (needed <= self.input_buffer.capacity) return;
-    var new_cap = if (self.input_buffer.capacity == 0) std.math.ceilPowerOfTwo(usize, needed) catch needed else self.input_buffer.capacity * 2;
+        var new_cap = if (self.input_buffer.capacity == 0) std.math.ceilPowerOfTwo(usize, needed) catch needed else self.input_buffer.capacity * 2;
         if (new_cap < needed) new_cap = needed;
         try self.input_buffer.ensureTotalCapacity(self.allocator, new_cap);
     }

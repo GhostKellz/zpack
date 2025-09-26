@@ -1,13 +1,27 @@
 const std = @import("std");
+const build_options = @import("build_options");
 
-pub const ZlibError = error{
-    OutOfMemory,
-    InvalidHeader,
-    UnsupportedWindow,
-    DictionaryUnsupported,
-    ChecksumMismatch,
+const c = blk: {
+    if (build_options.use_system_zlib) {
+        break :blk @cImport({
+            @cInclude("zlib.h");
+        });
+    } else {
+        break :blk @cImport({
+            @cDefine("MINIZ_NO_ARCHIVE_APIS", "1");
+            @cDefine("MINIZ_NO_ARCHIVE_WRITING_APIS", "1");
+            @cDefine("MINIZ_NO_STDIO", "1");
+            @cDefine("MINIZ_NO_TIME", "1");
+            @cInclude("miniz.h");
+        });
+    }
+};
+
+pub const Error = error{
+    ZlibUnavailable,
     CompressionFailed,
     DecompressionFailed,
+    OutOfMemory,
 };
 
 pub const CompressionLevel = enum {
@@ -16,136 +30,104 @@ pub const CompressionLevel = enum {
     best,
 };
 
-const Header = struct {
-    cmf: u8,
-    flg: u8,
-};
-
-const ArrayListWriter = struct {
-    list: *std.ArrayListUnmanaged(u8),
-    allocator: std.mem.Allocator,
-    pub const WriterError = std.mem.Allocator.Error;
-
-    pub fn writeAll(self: *ArrayListWriter, bytes: []const u8) WriterError!void {
-        try self.list.appendSlice(self.allocator, bytes);
-    }
-};
-
-fn makeHeader(level: CompressionLevel) Header {
-    const cm: u8 = 8; // DEFLATE
-    const cinfo: u8 = 7; // 32 KiB window
-    const cmf: u8 = (cinfo << 4) | cm;
-
-    var flg: u8 = switch (level) {
-        .fast => 0x00,
-        .balanced => 0x40,
-        .best => 0x80,
-    };
-
-    const value: u16 = (@as(u16, cmf) << 8) | flg;
-    const remainder = value % 31;
-    if (remainder != 0) {
-        flg = @intCast((@as(u16, flg) + (31 - remainder)) & 0xff);
-    }
-
-    return Header{ .cmf = cmf, .flg = flg };
-}
-
-fn translateLevel(level: CompressionLevel) std.compress.deflate.CompressionLevel {
+fn levelToC(level: CompressionLevel) c_int {
     return switch (level) {
-        .fast => .fast,
-        .balanced => .default,
-        .best => .best,
+        .fast => c.Z_BEST_SPEED,
+        .balanced => c.Z_DEFAULT_COMPRESSION,
+        .best => c.Z_BEST_COMPRESSION,
     };
 }
 
-fn writeChecksum(writer: *ArrayListWriter, checksum: u32) std.mem.Allocator.Error!void {
-    var buf: [4]u8 = undefined;
-    std.mem.writeInt(u32, &buf, checksum, .big);
-    try writer.writeAll(&buf);
-}
-
-fn parseHeader(input: []const u8) ZlibError!Header {
-    if (input.len < 2) return ZlibError.InvalidHeader;
-    const cmf = input[0];
-    const flg = input[1];
-
-    const cm = cmf & 0x0f;
-    if (cm != 8) return ZlibError.InvalidHeader;
-
-    const cinfo = cmf >> 4;
-    if (cinfo > 7) return ZlibError.UnsupportedWindow;
-
-    const has_dict = (flg & 0x20) != 0;
-    if (has_dict) return ZlibError.DictionaryUnsupported;
-
-    const combined = (@as(u16, cmf) << 8) | flg;
-    if (combined % 31 != 0) return ZlibError.InvalidHeader;
-
-    return Header{ .cmf = cmf, .flg = flg };
-}
-
-pub fn compress(allocator: std.mem.Allocator, input: []const u8, level: CompressionLevel) ZlibError![]u8 {
-    var output = std.ArrayListUnmanaged(u8){};
-    errdefer output.deinit(allocator);
-
-    const header = makeHeader(level);
-    output.append(allocator, header.cmf) catch return ZlibError.OutOfMemory;
-    output.append(allocator, header.flg) catch return ZlibError.OutOfMemory;
-
-    var writer = ArrayListWriter{ .list = &output, .allocator = allocator };
-    var compressor = std.compress.deflate.compressor(&writer, .{
-        .level = translateLevel(level),
-    }) catch return ZlibError.CompressionFailed;
-    defer compressor.deinit();
-
-    compressor.writeAll(input) catch |err| {
-        switch (err) {
-            error.OutOfMemory => return ZlibError.OutOfMemory,
-            else => return ZlibError.CompressionFailed,
-        }
+fn mapCompressError(code: c_int) Error {
+    return switch (code) {
+        c.Z_MEM_ERROR => Error.OutOfMemory,
+        c.Z_BUF_ERROR => Error.CompressionFailed,
+        else => Error.CompressionFailed,
     };
-    compressor.finish() catch return ZlibError.CompressionFailed;
-
-    const checksum = std.hash.Adler32.hash(input);
-    writeChecksum(&writer, checksum) catch return ZlibError.OutOfMemory;
-
-    return output.toOwnedSlice(allocator) catch return ZlibError.OutOfMemory;
 }
 
-pub fn decompress(allocator: std.mem.Allocator, input: []const u8) ZlibError![]u8 {
-    if (input.len < 6) return ZlibError.InvalidHeader;
-    _ = try parseHeader(input);
+fn mapDecompressError(code: c_int) Error {
+    return switch (code) {
+        c.Z_MEM_ERROR => Error.OutOfMemory,
+        c.Z_BUF_ERROR => Error.DecompressionFailed,
+        c.Z_DATA_ERROR => Error.DecompressionFailed,
+        else => Error.DecompressionFailed,
+    };
+}
 
-    const payload = input[2 .. input.len - 4];
-    const expected_checksum = std.mem.readInt(u32, input[input.len - 4 ..], .big);
-
-    var stream = std.io.fixedBufferStream(payload);
-    var decompressor = std.compress.deflate.decompressor(stream.reader(), .{}) catch return ZlibError.DecompressionFailed;
-    defer decompressor.deinit();
-
-    var output = std.ArrayListUnmanaged(u8){};
-    errdefer output.deinit(allocator);
-
-    var buffer: [4096]u8 = undefined;
-    while (true) {
-        const read_len = decompressor.read(&buffer) catch |err| {
-            return switch (err) {
-                error.EndOfStream => ZlibError.DecompressionFailed,
-                error.StreamLacksBytes => ZlibError.DecompressionFailed,
-                error.DataStreamTooLong => ZlibError.DecompressionFailed,
-                error.CorruptData => ZlibError.DecompressionFailed,
-                error.OutOfMemory => ZlibError.OutOfMemory,
-                else => ZlibError.DecompressionFailed,
-            };
-        };
-
-        if (read_len == 0) break;
-        output.appendSlice(allocator, buffer[0..read_len]) catch return ZlibError.OutOfMemory;
+fn compressBound(len: usize) Error!c.ulong {
+    if (@hasDecl(c, "compressBound")) {
+        return c.compressBound(@intCast(len));
+    } else if (@hasDecl(c, "mz_compressBound")) {
+        return c.mz_compressBound(@intCast(len));
     }
+    return Error.ZlibUnavailable;
+}
 
-    const checksum = std.hash.Adler32.hash(output.items);
-    if (checksum != expected_checksum) return ZlibError.ChecksumMismatch;
+fn callCompress(dest: [*]u8, dest_len: *c.ulong, src: [*]const u8, len: usize, level: CompressionLevel) Error!c_int {
+    if (@hasDecl(c, "compress2")) {
+        return c.compress2(dest, dest_len, src, @intCast(len), levelToC(level));
+    } else if (@hasDecl(c, "mz_compress2")) {
+        return c.mz_compress2(dest, dest_len, src, @intCast(len), levelToC(level));
+    } else if (@hasDecl(c, "mz_compress")) {
+        return c.mz_compress(dest, dest_len, src, @intCast(len));
+    }
+    return Error.ZlibUnavailable;
+}
 
-    return output.toOwnedSlice(allocator) catch return ZlibError.OutOfMemory;
+fn callUncompress(dest: [*]u8, dest_len: *c.ulong, src: [*]const u8, src_len_ptr: ?*c.ulong, src_len_value: c.ulong) Error!c_int {
+    if (@hasDecl(c, "uncompress2")) {
+        return c.uncompress2(dest, dest_len, src, src_len_ptr.?);
+    } else if (@hasDecl(c, "mz_uncompress2")) {
+        return c.mz_uncompress2(dest, dest_len, src, src_len_ptr.?);
+    } else if (@hasDecl(c, "uncompress")) {
+        return c.uncompress(dest, dest_len, src, src_len_value);
+    } else if (@hasDecl(c, "mz_uncompress")) {
+        return c.mz_uncompress(dest, dest_len, src, src_len_value);
+    }
+    return Error.ZlibUnavailable;
+}
+
+pub fn compress(allocator: std.mem.Allocator, input: []const u8, level: CompressionLevel) Error![]u8 {
+    const bound = try compressBound(input.len);
+    const capacity = @as(usize, @intCast(bound));
+    var buffer = try allocator.alloc(u8, capacity);
+    errdefer allocator.free(buffer);
+
+    var dest_len: c.ulong = bound;
+    const rc = try callCompress(buffer.ptr, &dest_len, input.ptr, input.len, level);
+    if (rc != c.Z_OK) return mapCompressError(rc);
+
+    const final_len = @as(usize, @intCast(dest_len));
+    if (final_len == buffer.len) return buffer;
+    buffer = try allocator.realloc(buffer, final_len);
+    return buffer;
+}
+
+pub fn decompress(allocator: std.mem.Allocator, compressed: []const u8, expected_size: usize) Error![]u8 {
+    var capacity = @max(expected_size, 1);
+    var buffer = try allocator.alloc(u8, capacity);
+    errdefer allocator.free(buffer);
+
+    while (true) {
+        var dest_len: c.ulong = @intCast(capacity);
+        var src_len: c.ulong = @intCast(compressed.len);
+
+        const rc = try callUncompress(buffer.ptr, &dest_len, compressed.ptr, &src_len, @intCast(compressed.len));
+
+        if (rc == c.Z_OK) {
+            const final_len = @as(usize, @intCast(dest_len));
+            if (final_len == buffer.len) return buffer;
+            buffer = try allocator.realloc(buffer, final_len);
+            return buffer;
+        }
+
+        if (rc == c.Z_BUF_ERROR) {
+            capacity *= 2;
+            buffer = try allocator.realloc(buffer, capacity);
+            continue;
+        }
+
+        return mapDecompressError(rc);
+    }
 }

@@ -106,8 +106,8 @@ fn fuzzStreaming(allocator: std.mem.Allocator, random: *Random, data: []const u8
     var index: usize = 0;
     while (index < data.len) {
         const remaining = data.len - index;
-    const chunk = @min(remaining, random.uintLessThan(usize, 4096) + 1);
-    try compressor.write(@constCast(&writer), data[index .. index + chunk]);
+        const chunk = @min(remaining, random.uintLessThan(usize, 4096) + 1);
+        try compressor.write(@constCast(&writer), data[index .. index + chunk]);
         index += chunk;
     }
     try compressor.finish(@constCast(&writer));
@@ -122,8 +122,8 @@ fn fuzzStreaming(allocator: std.mem.Allocator, random: *Random, data: []const u8
     index = 0;
     while (index < compressed.items.len) {
         const remaining = compressed.items.len - index;
-    const chunk = @min(remaining, random.uintLessThan(usize, 4096) + 1);
-    try decompressor.write(@constCast(&out_writer), compressed.items[index .. index + chunk]);
+        const chunk = @min(remaining, random.uintLessThan(usize, 4096) + 1);
+        try decompressor.write(@constCast(&out_writer), compressed.items[index .. index + chunk]);
         index += chunk;
     }
     try decompressor.finish(@constCast(&out_writer));

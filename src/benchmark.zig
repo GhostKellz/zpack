@@ -1,8 +1,7 @@
 const std = @import("std");
 const zpack = @import("zpack");
 const build_options = @import("build_options");
-
-const has_zlib = @hasDecl(std.compress, "zlib");
+const zlib_reference = @import("reference/zlib.zig");
 
 const BenchmarkResult = struct {
     name: []const u8,
@@ -32,8 +31,8 @@ const BenchmarkResult = struct {
         std.debug.print("Input size: {d} bytes\n", .{self.input_size});
         std.debug.print("Compressed size: {d} bytes\n", .{self.compressed_size});
         std.debug.print("Compression ratio: {d:.2}x\n", .{ratio});
-        std.debug.print("Compression time: {d:.2}ms ({d:.2} MB/s)\n", .{@as(f64, @floatFromInt(self.compression_time_ns)) / 1_000_000.0, comp_mbps});
-        std.debug.print("Decompression time: {d:.2}ms ({d:.2} MB/s)\n", .{@as(f64, @floatFromInt(self.decompression_time_ns)) / 1_000_000.0, decomp_mbps});
+        std.debug.print("Compression time: {d:.2}ms ({d:.2} MB/s)\n", .{ @as(f64, @floatFromInt(self.compression_time_ns)) / 1_000_000.0, comp_mbps });
+        std.debug.print("Decompression time: {d:.2}ms ({d:.2} MB/s)\n", .{ @as(f64, @floatFromInt(self.decompression_time_ns)) / 1_000_000.0, decomp_mbps });
         std.debug.print("\n", .{});
     }
 };
@@ -126,62 +125,47 @@ pub fn benchmarkRLE(allocator: std.mem.Allocator, name: []const u8, input: []con
 }
 
 pub fn benchmarkZlib(allocator: std.mem.Allocator, name: []const u8, input: []const u8) !BenchmarkResult {
-    if (comptime has_zlib) {
-        const zlib = std.compress.zlib;
+    const RefError = zlib_reference.Error;
 
-        var timer = try std.time.Timer.start();
+    var timer = try std.time.Timer.start();
 
-        var compressed = try std.ArrayList(u8).initCapacity(allocator, 0);
-        defer compressed.deinit();
+    timer.reset();
+    const compressed = zlib_reference.compress(allocator, input, .balanced) catch |err| switch (err) {
+        RefError.ZlibUnavailable => return error.ZlibUnavailable,
+        RefError.OutOfMemory => return error.OutOfMemory,
+        RefError.CompressionFailed => return error.CompressionFailed,
+        RefError.DecompressionFailed => return error.CompressionFailed,
+    };
+    const compression_time = timer.read();
+    defer allocator.free(compressed);
 
-        timer.reset();
-        {
-            var compressor = zlib.compressor(compressed.writer(), .{});
-            defer compressor.deinit();
-            try compressor.writeAll(input);
-            try compressor.finish();
-        }
-        const compression_time = timer.read();
+    timer.reset();
+    const decompressed = zlib_reference.decompress(allocator, compressed, input.len) catch |err| switch (err) {
+        RefError.ZlibUnavailable => return error.ZlibUnavailable,
+        RefError.OutOfMemory => return error.OutOfMemory,
+        RefError.CompressionFailed => return error.DecompressionFailed,
+        RefError.DecompressionFailed => return error.DecompressionFailed,
+    };
+    const decompression_time = timer.read();
+    defer allocator.free(decompressed);
 
-        var decompressed = try std.ArrayList(u8).initCapacity(allocator, 0);
-        defer decompressed.deinit();
-
-        timer.reset();
-        {
-            var stream = std.io.fixedBufferStream(compressed.items);
-            var decompressor = zlib.decompressor(stream.reader(), .{});
-            defer decompressor.deinit();
-
-            var writer = decompressed.writer();
-            var buf: [4096]u8 = undefined;
-            while (true) {
-                const read_len = try decompressor.read(&buf);
-                if (read_len == 0) break;
-                try writer.writeAll(buf[0..read_len]);
-            }
-        }
-        const decompression_time = timer.read();
-
-        if (!std.mem.eql(u8, input, decompressed.items)) {
-            return error.RoundtripFailed;
-        }
-
-        const compressed_size = compressed.items.len;
-
-        return BenchmarkResult{
-            .name = name,
-            .input_size = input.len,
-            .compressed_size = compressed_size,
-            .compression_time_ns = compression_time,
-            .decompression_time_ns = decompression_time,
-            .compression_ratio = if (compressed_size == 0)
-                std.math.inf(f64)
-            else
-                @as(f64, @floatFromInt(input.len)) / @as(f64, @floatFromInt(compressed_size)),
-        };
-    } else {
-        return error.ZlibUnavailable;
+    if (!std.mem.eql(u8, input, decompressed)) {
+        return error.RoundtripFailed;
     }
+
+    const compressed_size = compressed.len;
+
+    return BenchmarkResult{
+        .name = name,
+        .input_size = input.len,
+        .compressed_size = compressed_size,
+        .compression_time_ns = compression_time,
+        .decompression_time_ns = decompression_time,
+        .compression_ratio = if (compressed_size == 0)
+            std.math.inf(f64)
+        else
+            @as(f64, @floatFromInt(input.len)) / @as(f64, @floatFromInt(compressed_size)),
+    };
 }
 
 const Pattern = enum { random, repetitive, text, binary };
@@ -259,7 +243,7 @@ pub fn runBenchmarks(allocator: std.mem.Allocator) !void {
             }
 
             if (build_options.enable_rle) {
-                const name = try std.fmt.allocPrint(allocator, "{s} (RLE)", .{ dataset });
+                const name = try std.fmt.allocPrint(allocator, "{s} (RLE)", .{dataset});
                 defer allocator.free(name);
                 const result = benchmarkRLE(allocator, name, data) catch |err| {
                     std.debug.print("Benchmark failed for {s}: {}\n", .{ name, err });
@@ -267,18 +251,21 @@ pub fn runBenchmarks(allocator: std.mem.Allocator) !void {
                 };
                 result.print();
             }
-            if (has_zlib) {
-                const reference_name = try std.fmt.allocPrint(allocator, "{s} (zlib reference)", .{ dataset });
-                defer allocator.free(reference_name);
-                const reference_result = benchmarkZlib(allocator, reference_name, data) catch |err| {
-                    std.debug.print("Benchmark failed for {s}: {}\n", .{ reference_name, err });
-                    continue;
-                };
-                reference_result.print();
-            } else if (!printed_zlib_notice) {
-                std.debug.print("Skipping zlib reference benchmark: std.compress.zlib unavailable in this Zig toolchain.\n\n", .{});
-                printed_zlib_notice = true;
-            }
+            const reference_name = try std.fmt.allocPrint(allocator, "{s} (zlib reference)", .{dataset});
+            defer allocator.free(reference_name);
+            const reference_result = benchmarkZlib(allocator, reference_name, data) catch |err| {
+                switch (err) {
+                    error.ZlibUnavailable => {
+                        if (!printed_zlib_notice) {
+                            std.debug.print("Skipping zlib reference benchmark: zlib implementation unavailable (system library missing or bundled build disabled).\n\n", .{});
+                            printed_zlib_notice = true;
+                        }
+                    },
+                    else => std.debug.print("Benchmark failed for {s}: {}\n", .{ reference_name, err }),
+                }
+                continue;
+            };
+            reference_result.print();
         }
         std.debug.print("\n", .{});
     }

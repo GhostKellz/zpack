@@ -10,6 +10,7 @@ pub const BuildConfig = struct {
     enable_simd: bool = true,
     enable_threading: bool = true,
     enable_validation: bool = true,
+    use_system_zlib: bool = false,
 };
 
 pub fn build(b: *std.Build) void {
@@ -26,6 +27,7 @@ pub fn build(b: *std.Build) void {
         .enable_simd = b.option(bool, "simd", "Enable SIMD optimizations (default: true)") orelse true,
         .enable_threading = b.option(bool, "threading", "Enable multi-threading support (default: true)") orelse true,
         .enable_validation = b.option(bool, "validation", "Enable data validation (default: true)") orelse true,
+        .use_system_zlib = b.option(bool, "use_system_zlib", "Link against system libz instead of bundled miniz (default: false)") orelse false,
     };
 
     // Create build options module
@@ -36,6 +38,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "enable_simd", config.enable_simd);
     options.addOption(bool, "enable_threading", config.enable_threading);
     options.addOption(bool, "enable_validation", config.enable_validation);
+    options.addOption(bool, "use_system_zlib", config.use_system_zlib);
     const options_module = options.createModule();
 
     // Print build configuration
@@ -58,6 +61,19 @@ pub fn build(b: *std.Build) void {
             .{ .name = "build_options", .module = options_module },
         },
     });
+    if (!config.use_system_zlib) {
+        mod.addIncludePath(b.path("deps"));
+        const miniz_flags = &[_][]const u8{
+            "-DMINIZ_NO_ARCHIVE_APIS",
+            "-DMINIZ_NO_ARCHIVE_WRITING_APIS",
+            "-DMINIZ_NO_STDIO",
+            "-DMINIZ_NO_TIME",
+        };
+        mod.addCSourceFile(.{ .file = b.path("deps/miniz.c"), .flags = miniz_flags });
+        mod.addCSourceFile(.{ .file = b.path("deps/miniz_tdef.c"), .flags = miniz_flags });
+        mod.addCSourceFile(.{ .file = b.path("deps/miniz_tinfl.c"), .flags = miniz_flags });
+        mod.link_libc = true;
+    }
 
     // CLI executable (optional)
     if (config.enable_cli) {
@@ -71,6 +87,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "zpack", .module = mod },
                     .{ .name = "build_options", .module = options_module },
                 },
+                .link_libc = !config.use_system_zlib,
             }),
         });
 
@@ -85,24 +102,36 @@ pub fn build(b: *std.Build) void {
         if (b.args) |args| {
             run_cmd.addArgs(args);
         }
+
+        if (config.use_system_zlib) {
+            exe.linkSystemLibrary("z");
+        }
     }
 
     // Benchmark executable (optional)
     if (config.enable_benchmarks) {
+        const benchmark_root = b.createModule(.{
+            .root_source_file = b.path("src/benchmark.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zpack", .module = mod },
+                .{ .name = "build_options", .module = options_module },
+            },
+            .link_libc = !config.use_system_zlib,
+        });
+        if (!config.use_system_zlib) {
+            benchmark_root.addIncludePath(b.path("deps"));
+        }
+
         const benchmark = b.addExecutable(.{
             .name = "zpack-benchmark",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/benchmark.zig"),
-                .target = target,
-                .optimize = optimize,
-                .imports = &.{
-                    .{ .name = "zpack", .module = mod },
-                    .{ .name = "build_options", .module = options_module },
-                },
-            }),
+            .root_module = benchmark_root,
         });
 
-        benchmark.linkSystemLibrary("z");
+        if (config.use_system_zlib) {
+            benchmark.linkSystemLibrary("z");
+        }
 
         b.installArtifact(benchmark);
 
@@ -112,18 +141,27 @@ pub fn build(b: *std.Build) void {
         benchmark_run.step.dependOn(b.getInstallStep());
     }
 
+    const fuzz_root = b.createModule(.{
+        .root_source_file = b.path("src/fuzz.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zpack", .module = mod },
+            .{ .name = "build_options", .module = options_module },
+        },
+        .link_libc = !config.use_system_zlib,
+    });
+    if (!config.use_system_zlib) {
+        fuzz_root.addIncludePath(b.path("deps"));
+    }
+
     const fuzz = b.addExecutable(.{
         .name = "zpack-fuzz",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/fuzz.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "zpack", .module = mod },
-                .{ .name = "build_options", .module = options_module },
-            },
-        }),
+        .root_module = fuzz_root,
     });
+    if (config.use_system_zlib) {
+        fuzz.linkSystemLibrary("z");
+    }
 
     b.installArtifact(fuzz);
 
@@ -150,6 +188,10 @@ pub fn build(b: *std.Build) void {
             }),
         });
 
+        if (config.use_system_zlib) {
+            profiler.linkSystemLibrary("z");
+        }
+
         const profile_step = b.step("profile", "Run compression profiling");
         const profile_run = b.addRunArtifact(profiler);
         profile_step.dependOn(&profile_run.step);
@@ -160,22 +202,33 @@ pub fn build(b: *std.Build) void {
     const mod_tests = b.addTest(.{
         .root_module = mod,
     });
+    if (config.use_system_zlib) {
+        mod_tests.linkSystemLibrary("z");
+    }
 
     const run_mod_tests = b.addRunArtifact(mod_tests);
 
     // Test executable for main.zig if CLI is enabled
     if (config.enable_cli) {
-        const exe_tests = b.addTest(.{
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/main.zig"),
-                .target = target,
-                .optimize = optimize,
-                .imports = &.{
-                    .{ .name = "zpack", .module = mod },
-                    .{ .name = "build_options", .module = options_module },
-                },
-            }),
+        const exe_root = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zpack", .module = mod },
+                .{ .name = "build_options", .module = options_module },
+            },
         });
+        if (!config.use_system_zlib) {
+            exe_root.addIncludePath(b.path("deps"));
+        }
+
+        const exe_tests = b.addTest(.{
+            .root_module = exe_root,
+        });
+        if (config.use_system_zlib) {
+            exe_tests.linkSystemLibrary("z");
+        }
 
         const run_exe_tests = b.addRunArtifact(exe_tests);
 

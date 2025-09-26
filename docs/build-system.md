@@ -35,6 +35,7 @@ zig build -Dstreaming=false -Doptimize=ReleaseSmall
 | `-Dsimd` | `true` | Enable SIMD optimizations | Performance boost |
 | `-Dthreading` | `true` | Enable multi-threading support | Parallel processing |
 | `-Dvalidation` | `true` | Enable data validation | Safety/reliability |
+| `-Duse_system_zlib` | `false` | Link against the platform libz instead of the bundled miniz reference | Integration flexibility |
 
 ## 📦 **Build Presets**
 
