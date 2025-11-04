@@ -498,9 +498,6 @@ fn readFileFully(allocator: std.mem.Allocator, dir: *std.fs.Dir, sub_path: []con
     var file = try dir.openFile(sub_path, .{ .mode = .read_only });
     defer file.close();
 
-    var reader_buffer: [4096]u8 = undefined;
-    var reader = file.reader(reader_buffer[0..]);
-
     var list = std.ArrayListUnmanaged(u8){};
     errdefer list.deinit(allocator);
 
@@ -508,10 +505,7 @@ fn readFileFully(allocator: std.mem.Allocator, dir: *std.fs.Dir, sub_path: []con
     var total_read: usize = 0;
 
     while (true) {
-        const read_len = reader.read(chunk[0..]) catch |err| switch (err) {
-            error.EndOfStream => break,
-            else => return err,
-        };
+        const read_len = try file.read(chunk[0..]);
         if (read_len == 0) break;
         total_read += read_len;
         if (max_size != 0 and total_read > max_size) {
@@ -547,11 +541,11 @@ fn spawn_and_run(alloc: std.mem.Allocator, exe: []const u8, args: []const []cons
     const max_err: usize = 1 * 1024 * 1024;
 
     const ReadThread = struct {
-        fn run(reader: *std.fs.File.Reader, buf: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, max_size: usize) void {
+        fn run(file: *std.fs.File, buf: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, max_size: usize) void {
             var tmp: [4096]u8 = undefined;
             var remaining = max_size;
             while (remaining > 0) {
-                const read_len = reader.read(tmp[0..@min(tmp.len, remaining)]) catch break;
+                const read_len = file.read(tmp[0..@min(tmp.len, remaining)]) catch break;
                 if (read_len == 0) break;
                 buf.appendSlice(allocator, tmp[0..read_len]) catch break;
                 remaining -= read_len;
@@ -562,14 +556,11 @@ fn spawn_and_run(alloc: std.mem.Allocator, exe: []const u8, args: []const []cons
     var out_buf = std.ArrayListUnmanaged(u8){};
     var err_buf = std.ArrayListUnmanaged(u8){};
 
-    var stdout_reader_buf: [4096]u8 = undefined;
-    var stderr_reader_buf: [4096]u8 = undefined;
+    var stdout_file = child.stdout.?;
+    var stderr_file = child.stderr.?;
 
-    var stdout_reader = child.stdout.?.reader(stdout_reader_buf[0..]);
-    var stderr_reader = child.stderr.?.reader(stderr_reader_buf[0..]);
-
-    const out_thread = try std.Thread.spawn(.{}, ReadThread.run, .{ &stdout_reader, &out_buf, alloc, max_out });
-    const err_thread = try std.Thread.spawn(.{}, ReadThread.run, .{ &stderr_reader, &err_buf, alloc, max_err });
+    const out_thread = try std.Thread.spawn(.{}, ReadThread.run, .{ &stdout_file, &out_buf, alloc, max_out });
+    const err_thread = try std.Thread.spawn(.{}, ReadThread.run, .{ &stderr_file, &err_buf, alloc, max_err });
 
     // 3) Wait with a watchdog timeout
     var timer = try std.time.Timer.start();
@@ -586,7 +577,7 @@ fn spawn_and_run(alloc: std.mem.Allocator, exe: []const u8, args: []const []cons
             term = std.process.Child.Term{ .Signal = 9 };
             break;
         }
-        std.Thread.sleep(5 * std.time.ns_per_ms);
+    std.Thread.yield() catch {};
     }
 
     out_thread.join();

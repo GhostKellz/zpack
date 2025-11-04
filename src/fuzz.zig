@@ -42,7 +42,27 @@ pub fn main() !void {
         if (iterations == 0) iterations = 1;
     }
 
-    const seed = @as(u64, @intCast(std.time.microTimestamp()));
+    var seed = std.crypto.random.int(u64);
+
+    if (args.len > 2) {
+        seed = std.fmt.parseInt(u64, args[2], 0) catch |err| {
+            std.log.err("invalid seed '{s}': {}", .{ args[2], err });
+            return err;
+        };
+    } else {
+        const seed_env = std.process.getEnvVarOwned(allocator, "ZPACK_FUZZ_SEED") catch |err| switch (err) {
+            error.EnvironmentVariableNotFound => null,
+            else => return err,
+        };
+        if (seed_env) |value| {
+            defer allocator.free(value);
+            seed = std.fmt.parseInt(u64, value, 0) catch |err| {
+                std.log.err("invalid seed from ZPACK_FUZZ_SEED '{s}': {}", .{ value, err });
+                return err;
+            };
+        }
+    }
+
     var prng = Random.DefaultPrng.init(seed);
     var random = prng.random();
 
