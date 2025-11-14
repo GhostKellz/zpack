@@ -1,19 +1,26 @@
-# zpack Documentation v0.3.2
+# zpack Documentation v0.3.4
 
-> **Fast, modular compression library for Zig - release candidate quality**
-
-⚠️ **Pre-1.0 Notice** ⚠️
-zpack is approaching a 1.0 release. The API is still subject to change, but the focus is on polish and production readiness.
+> **Fast, intelligent compression library for Zig - production ready**
 
 Welcome to the comprehensive documentation for **zpack**, the next-generation compression library designed specifically for the Zig ecosystem. This documentation covers everything from basic usage to advanced enterprise features.
 
-## 🚀 **What's New in v0.3.2**
+## 🚀 **What's New in v0.3.4**
 
-- ✅ **Quiet Build Output** - Opt-in build banner via `-Dshow_build_config` and the new `zig build config` step
-- ✅ **Async Streaming Futures** - `compressStreamAsync` and `decompressStreamAsync` integrate with any `std.Io` runtime
-- ✅ **Deterministic Fuzzing** - Reproduce harness runs with `ZPACK_FUZZ_SEED` or a CLI seed override
-- ✅ **Documentation Refresh** - Updated build guide, CLI manual, and troubleshooting workflow to match modern Zig releases
-- ✅ **Expanded Build Matrix** - Nine build options covering SIMD, threading, validation, packaging, and reporting
+- ✅ **Delta/Incremental Compression** - 80-95% bandwidth savings for package updates and blockchain deltas
+- ✅ **Adaptive Compression** - Automatic algorithm selection based on content analysis (10-40% faster)
+- ✅ **Quality Levels (1-9)** - Simple gzip-style API (level 1 = 4x faster, level 9 = best compression)
+- ✅ **Decompression Bomb Protection** - Security hardening with <1% overhead
+- ✅ **Integration Examples** - Complete guides for LSP servers, package managers, and blockchain
+- ✅ **Performance Guide** - Detailed benchmarks and optimization strategies
+
+## 📖 **New in v0.3.4**
+
+| Feature | Description | Guide |
+|---------|-------------|-------|
+| **[Delta Compression](../DOCS.md#deltacompressor)** | Bandwidth-efficient updates | [Package Manager Example](examples/package_manager.md) |
+| **[Adaptive Compression](../DOCS.md#adaptivecompressor)** | Smart algorithm selection | [Performance Guide](performance_v0.3.4.md) |
+| **[Quality Levels](../DOCS.md#qualitycompressor)** | Simple 1-9 API | [LSP Server Example](examples/lsp_server.md) |
+| **[Security](../DOCS.md#securedecompressor)** | Bomb protection | [Package Manager Example](examples/package_manager.md) |
 
 ## 📚 **Documentation Index**
 

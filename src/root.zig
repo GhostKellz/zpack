@@ -12,6 +12,20 @@ pub const Preset = @import("presets.zig").Preset;
 pub const selectPresetForFile = @import("presets.zig").selectPresetForFile;
 pub const simd_hash = @import("simd_hash.zig");
 
+// v0.3.4 New Features
+pub const delta = @import("delta.zig");
+pub const DeltaCompressor = delta.DeltaCompressor;
+pub const Delta = delta.Delta;
+pub const adaptive = @import("adaptive.zig");
+pub const AdaptiveCompressor = adaptive.AdaptiveCompressor;
+pub const ContentAnalysis = adaptive.ContentAnalysis;
+pub const quality = @import("quality.zig");
+pub const QualityLevel = quality.QualityLevel;
+pub const QualityCompressor = quality.QualityCompressor;
+pub const security = @import("security.zig");
+pub const SecureDecompressor = security.SecureDecompressor;
+pub const SecurityLimits = security.SecurityLimits;
+
 pub const ZpackError = error{
     InvalidData,
     CorruptedData,

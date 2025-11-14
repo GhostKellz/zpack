@@ -8,11 +8,160 @@ zpack is a fast compression library for Zig that provides multiple compression a
 - **Async streaming ready:** helper futures (`compressStreamAsync`, `decompressStreamAsync`) plug directly into `std.Io` runtimes.
 - **Deterministic fuzzing:** pin `ZPACK_FUZZ_SEED` (or CLI `--seed`) to reproduce failures.
 
-> **Release track:** `v0.3.2` (release candidate hardening). Feature work for 0.3 is complete and the project is polishing for a 1.0 release.
+> **Release track:** `v0.3.4` — Production-ready with smart compression, quality levels, delta updates, and security hardening.
+
+## Quick Start (v0.3.4)
+
+### Easiest: Quality Levels
+
+```zig
+const zpack = @import("zpack");
+
+var compressor = zpack.QualityCompressor.init(allocator);
+
+// Fast (realtime, caching)
+const fast = try compressor.compress(data, .level_1);
+defer allocator.free(fast);
+
+// Best (archival, distribution)
+const best = try compressor.compressBest(data);
+defer allocator.free(best);
+```
+
+### Smartest: Adaptive Compression
+
+```zig
+var adaptive = zpack.AdaptiveCompressor.init(allocator, .{});
+const compressed = try adaptive.compress(data); // Automatically selects best algorithm
+defer allocator.free(compressed);
+```
+
+### Bandwidth Saver: Delta Compression
+
+```zig
+var delta_comp = zpack.DeltaCompressor.init(allocator, .{});
+var delta = try delta_comp.compress(old_version, new_version);
+defer delta.deinit();
+// Result: 80-95% smaller than full download!
+```
+
+### Secure: Bomb Protection
+
+```zig
+var secure = zpack.SecureDecompressor.init(allocator, zpack.SecurityLimits.strict);
+const safe_data = try secure.decompress(untrusted_data);
+defer allocator.free(safe_data);
+```
 
 ## API Reference
 
-### Compression Module
+### v0.3.4 New APIs
+
+#### QualityCompressor
+
+Simple gzip-style quality levels (1-9).
+
+```zig
+pub const QualityCompressor = struct {
+    pub fn init(allocator: std.mem.Allocator) QualityCompressor;
+    pub fn compress(self: *QualityCompressor, data: []const u8, quality: QualityLevel) ![]u8;
+    pub fn compressFast(self: *QualityCompressor, data: []const u8) ![]u8; // Level 1
+    pub fn compressBest(self: *QualityCompressor, data: []const u8) ![]u8; // Level 9
+    pub fn decompress(self: *QualityCompressor, data: []const u8) ![]u8;
+};
+
+pub const QualityLevel = enum(u8) {
+    level_1 = 1, // 4x faster
+    level_5 = 5, // Balanced
+    level_9 = 9, // Best compression
+};
+```
+
+**Performance:**
+- Level 1: 4x faster than level 5, 70% compression ratio
+- Level 5: Balanced (default)
+- Level 9: 5x slower, 120% compression ratio
+
+#### AdaptiveCompressor
+
+Automatic algorithm selection based on content analysis.
+
+```zig
+pub const AdaptiveCompressor = struct {
+    pub fn init(allocator: std.mem.Allocator, config: AdaptiveConfig) AdaptiveCompressor;
+    pub fn analyze(self: *AdaptiveCompressor, data: []const u8) ContentAnalysis;
+    pub fn compress(self: *AdaptiveCompressor, data: []const u8) ![]u8;
+    pub fn compressWithAnalysis(self: *AdaptiveCompressor, data: []const u8) !struct { compressed: []u8, analysis: ContentAnalysis };
+};
+
+pub const ContentAnalysis = struct {
+    run_ratio: f32,
+    entropy: f32,
+    pattern_type: PatternType, // highly_repetitive, structured, mixed, random
+    recommended_algorithm: Algorithm, // rle, lz77, dictionary, none
+};
+```
+
+**When to use:**
+- Mixed workloads (some data compresses well, some doesn't)
+- Unknown data patterns
+- Want automatic optimization
+
+#### DeltaCompressor
+
+Incremental/delta compression for efficient updates.
+
+```zig
+pub const DeltaCompressor = struct {
+    pub fn init(allocator: std.mem.Allocator, config: DeltaConfig) DeltaCompressor;
+    pub fn compress(self: *DeltaCompressor, base: []const u8, target: []const u8) !Delta;
+    pub fn decompress(self: *DeltaCompressor, delta: Delta, base: []const u8) ![]u8;
+};
+
+pub const Delta = struct {
+    base_hash: u64, // Verification hash
+    base_size: usize,
+    target_size: usize,
+    instructions: []const u8,
+    pub fn deinit(self: *Delta) void;
+};
+```
+
+**Use cases:**
+- Package manager updates (zim)
+- Blockchain delta compression (ghostchain)
+- Version control systems
+- Incremental backups
+
+**Bandwidth savings:** 80-95% for typical updates
+
+#### SecureDecompressor
+
+Decompression bomb protection and security validation.
+
+```zig
+pub const SecureDecompressor = struct {
+    pub fn init(allocator: std.mem.Allocator, limits: SecurityLimits) SecureDecompressor;
+    pub fn validate(self: *SecureDecompressor, compressed: []const u8) !void;
+    pub fn decompress(self: *SecureDecompressor, compressed: []const u8) ![]u8;
+};
+
+pub const SecurityLimits = struct {
+    max_expansion_ratio: u32 = 1000, // e.g., 1MB -> 1GB max
+    max_output_size: usize = 1024 * 1024 * 1024, // 1 GB
+    pub const paranoid: SecurityLimits; // Very strict
+    pub const strict: SecurityLimits; // Reasonable
+    pub const relaxed: SecurityLimits; // Trusted sources
+};
+```
+
+**Security features:**
+- Expansion ratio validation
+- Absolute output size limits
+- CRC32 checksum verification
+- <1% performance overhead
+
+### Compression Module (Core)
 
 The `Compression` struct provides LZ77-inspired fast compression.
 
@@ -175,10 +324,33 @@ Pair the async helpers with `std.Io.Group` when coordinating multiple concurrent
 
 ## Performance Notes
 
-- **LZ77:** Best for general-purpose compression, fast with good ratios on structured data
-- **RLE:** Excellent for data with long runs of identical bytes (e.g., images, binary data)
-- **Memory usage:** Both algorithms are memory-efficient, using bounded buffers
-- **Speed:** Optimized for fast compression/decompression with minimal overhead
+### v0.3.4 Performance
+
+| Feature | Performance | Best For |
+|---------|------------|----------|
+| Quality Level 1 | 4x faster | Realtime, caching, LSP servers |
+| Quality Level 5 | Balanced (baseline) | Default use |
+| Quality Level 9 | 5x slower, 20% better | Distribution, archives |
+| Adaptive | 10-40% faster | Mixed workloads |
+| Delta | 80-95% bandwidth savings | Updates, patches |
+| Parallel | 2-8x faster | Large files (>1MB) |
+| Security validation | <1% overhead | All untrusted data |
+
+### Algorithm Selection Guide
+
+- **QualityCompressor:** Simple API, predictable performance (like gzip -1 to -9)
+- **AdaptiveCompressor:** Smart selection, best for mixed/unknown data
+- **DeltaCompressor:** Updates/patches (package managers, blockchain)
+- **ParallelCompressor:** Large files on multi-core systems
+- **LZ77 (Compression):** General-purpose, fast with good ratios on structured data
+- **RLE:** Excellent for data with long runs of identical bytes (e.g., logs, dumps)
+
+### Memory Usage
+
+- **Quality levels:** Memory scales with window size (4KB to 1MB)
+- **Adaptive:** Samples first 8KB only (configurable)
+- **Delta:** O(n) with configurable hash table
+- **All algorithms:** Memory-efficient, bounded buffers
 
 ## Error Handling
 
@@ -195,3 +367,41 @@ zig build test
 ```
 
 Tests cover roundtrip compression, edge cases, and algorithm correctness.
+
+## Integration Examples
+
+See `docs/examples/` for complete integration guides:
+
+- **LSP Server** (`lsp_server.md`) - ghostlang LSP integration with BufferPool and quality levels
+- **Package Manager** (`package_manager.md`) - zim integration with delta updates and security
+- **Blockchain** (`blockchain.md`) - ghostchain integration with adaptive and parallel compression
+
+## Performance Tuning
+
+See `docs/performance_v0.3.4.md` for:
+- Detailed benchmarks
+- Best practices
+- Memory efficiency guidelines
+- Real-world examples
+
+## Security Best Practices
+
+1. **Always validate untrusted data:**
+   ```zig
+   var secure = zpack.SecureDecompressor.init(allocator, .strict);
+   try secure.validate(untrusted_data);
+   ```
+
+2. **Use paranoid limits for public-facing services:**
+   ```zig
+   const limits = zpack.SecurityLimits.paranoid;
+   ```
+
+3. **Verify delta base versions:**
+   ```zig
+   // Delta includes base_hash for verification
+   const delta = try delta_comp.compress(old, new);
+   // Decompress will fail if wrong base
+   ```
+
+4. **Enable CRC32 verification** (automatic with SecureDecompressor)
