@@ -1,23 +1,19 @@
-# zpack Documentation v0.1.0-beta.1
+# zpack Documentation v0.3.2
 
-> **Fast, modular compression library for Zig - experimental/lab/personal use**
+> **Fast, modular compression library for Zig - release candidate quality**
 
-⚠️ **EXPERIMENTAL LIBRARY - FOR LAB/PERSONAL USE** ⚠️
-This is an experimental library under active development. It is
-intended for research, learning, and personal projects. The API is subject
-to change!
+⚠️ **Pre-1.0 Notice** ⚠️
+zpack is approaching a 1.0 release. The API is still subject to change, but the focus is on polish and production readiness.
 
 Welcome to the comprehensive documentation for **zpack**, the next-generation compression library designed specifically for the Zig ecosystem. This documentation covers everything from basic usage to advanced enterprise features.
 
-## 🚀 **What's New in v0.1.0**
+## 🚀 **What's New in v0.3.2**
 
-- ✅ **Modular Build System** - 8 build options, 3 presets, conditional compilation
-- ✅ **SIMD Acceleration** - Vectorized operations for maximum performance
-- ✅ **Multi-threading Support** - Parallel compression for large files
-- ✅ **Ecosystem Integration** - zlib/LZ4 compatibility, C bindings, WASM support
-- ✅ **Professional CLI** - Enhanced interface with version, help, examples
-- ✅ **Performance Optimization** - Memory pools, resource limits, profiling tools
-- ✅ **Enterprise Features** - Progress tracking, streaming, validation
+- ✅ **Quiet Build Output** - Opt-in build banner via `-Dshow_build_config` and the new `zig build config` step
+- ✅ **Async Streaming Futures** - `compressStreamAsync` and `decompressStreamAsync` integrate with any `std.Io` runtime
+- ✅ **Deterministic Fuzzing** - Reproduce harness runs with `ZPACK_FUZZ_SEED` or a CLI seed override
+- ✅ **Documentation Refresh** - Updated build guide, CLI manual, and troubleshooting workflow to match modern Zig releases
+- ✅ **Expanded Build Matrix** - Nine build options covering SIMD, threading, validation, packaging, and reporting
 
 ## 📚 **Documentation Index**
 
@@ -48,6 +44,7 @@ Welcome to the comprehensive documentation for **zpack**, the next-generation co
 | **[🔗 Ecosystem Integration](ecosystem.md)** | zlib/LZ4 compatibility, C bindings | Advanced |
 | **[🌐 WebAssembly](wasm.md)** | Browser and WASM integration | Advanced |
 | **[📝 Migration Guide](migration.md)** | From other compression libraries | Intermediate |
+| **[🏢 Production Adoption](adoption.md)** | Rollout and operations checklist | Advanced |
 
 ### **📖 Reference**
 | Guide | Description | Level |
@@ -80,6 +77,9 @@ zig build -Dstreaming=false
 
 # Full build (100KB) - All features enabled
 zig build -Dbenchmarks=true
+
+# Show build configuration banner when you need it
+zig build -Dshow_build_config=true config
 ```
 
 ### **Professional CLI**
@@ -93,6 +93,28 @@ zig build run -- compress myfile.txt --level best
 
 # Use RLE for repetitive data
 zig build run -- compress data.log --algorithm rle
+
+# Run the CLI with an explicit fuzz seed for reproducibility
+zig build run -- fuzz --seed 12345
+```
+
+### **Async Streaming (Threaded Runtime)**
+```zig
+const std = @import("std");
+const zpack = @import("zpack");
+
+var threaded = std.Io.Threaded.init(std.heap.page_allocator);
+defer threaded.deinit();
+const io = threaded.io();
+
+var source = std.io.fixedBufferStream(input_bytes);
+var sink_buffer: [512 * 1024]u8 = undefined;
+var sink = std.io.fixedBufferStream(&sink_buffer);
+
+var future = zpack.compressStreamAsync(io, allocator, &source.reader(), &sink.writer(), .balanced, 64 * 1024);
+try future.await(io);
+
+const compressed_slice = sink.getWritten();
 ```
 
 ## 🎯 **Build Configurations**
@@ -107,6 +129,7 @@ zig build run -- compress data.log --algorithm rle
 -Dsimd=false          # Disable SIMD optimizations
 -Dthreading=false     # Disable multi-threading
 -Dvalidation=false    # Skip data validation
+-Dshow_build_config   # Print build configuration banner (defaults to quiet)
 ```
 
 ### **Preset Configurations**
@@ -114,6 +137,7 @@ zig build run -- compress data.log --algorithm rle
 zig build minimal     # LZ77 only, no CLI (~20KB)
 zig build standard    # LZ77 + RLE, basic features (~50KB)
 zig build full        # All features enabled (~100KB)
+zig build config      # Print cached build configuration
 ```
 
 ### **Build Analysis**
@@ -211,9 +235,17 @@ zig build size
 
 1. **New User?** Start with the [Quick Start Guide](zig-integration.md)
 2. **Replacing zlib?** Check the [Migration Guide](migration.md)
-3. **Performance Critical?** Read the [Performance Guide](performance.md)
-4. **Enterprise Use?** Review [Advanced Features](streaming.md)
-5. **Having Issues?** Visit [Troubleshooting](troubleshooting.md)
+3. **Async pipelines?** Explore the [Streaming Guide](streaming.md)
+4. **Performance Critical?** Read the [Performance Guide](performance.md)
+5. **Enterprise Use?** Review [Advanced Features](streaming.md)
+6. **Having Issues?** Visit [Troubleshooting](troubleshooting.md)
+
+## 🏢 **Production Adoption Checklist**
+
+1. **Lock in build output:** Rely on quiet defaults and enable the banner only when auditing builds (`zig build -Dshow_build_config=true config`).
+2. **Adopt async streaming:** Use `compressStreamAsync` / `decompressStreamAsync` with `std.Io.Threaded` or `std.Io.Evented` to integrate with existing runtimes.
+3. **Codify reproducibility:** Pin fuzz runs with `ZPACK_FUZZ_SEED`, check `zig build validate`, and capture coverage into `zig-out/coverage` (see `docs/adoption.md`).
+4. **Rollout plan:** Follow the [Production Adoption Guide](adoption.md) for phased deployment recommendations.
 
 ## 🤝 **Community**
 
@@ -224,6 +256,4 @@ zig build size
 
 ---
 
-**zpack v0.1.0-beta.1** - The future of compression in Zig 🚀
-
-*For experimental, lab, and personal projects only*
+**zpack v0.3.2** - Release candidate quality with production guidance 🚀

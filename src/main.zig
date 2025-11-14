@@ -1,9 +1,9 @@
 const std = @import("std");
-const posix = std.posix;
+const builtin = @import("builtin");
 const zpack = @import("zpack");
 const build_options = @import("build_options");
 
-const VERSION = "0.3.0-rc.1";
+const VERSION = "0.3.3";
 const STREAM_CHUNK_SIZE: usize = 64 * 1024;
 const log = std.log.scoped(.zpack_cli);
 
@@ -435,11 +435,37 @@ fn buildStreamingInput(allocator: std.mem.Allocator, repeat_count: usize) ![]u8 
 }
 
 fn writeStdout(data: []const u8) !void {
-    var remaining = data;
-    while (remaining.len > 0) {
-        const written = try posix.write(posix.STDOUT_FILENO, remaining);
-        if (written == 0) return error.WriteFailed;
-        remaining = remaining[written..];
+    if (builtin.target.os.tag == .windows) {
+        const windows = std.os.windows;
+        const handle_opt = windows.kernel32.GetStdHandle(windows.STD_OUTPUT_HANDLE);
+        if (handle_opt == null or handle_opt == windows.INVALID_HANDLE_VALUE) return error.WriteFailed;
+        const handle = handle_opt.?;
+
+        var remaining = data;
+        while (remaining.len > 0) {
+            const chunk_len: usize = @min(remaining.len, std.math.maxInt(u32));
+            const dword_len = std.math.cast(windows.DWORD, chunk_len) orelse return error.WriteFailed;
+            var written: windows.DWORD = 0;
+            if (windows.kernel32.WriteFile(
+                handle,
+                remaining.ptr,
+                dword_len,
+                &written,
+                null,
+            ) == 0) {
+                return error.WriteFailed;
+            }
+            if (written == 0) return error.WriteFailed;
+            const advance = std.math.cast(usize, written) orelse return error.WriteFailed;
+            remaining = remaining[advance..];
+        }
+    } else {
+        var remaining = data;
+        while (remaining.len > 0) {
+            const written = try std.posix.write(std.posix.STDOUT_FILENO, remaining);
+            if (written == 0) return error.WriteFailed;
+            remaining = remaining[written..];
+        }
     }
 }
 
@@ -577,7 +603,7 @@ fn spawn_and_run(alloc: std.mem.Allocator, exe: []const u8, args: []const []cons
             term = std.process.Child.Term{ .Signal = 9 };
             break;
         }
-    std.Thread.yield() catch {};
+        std.Thread.yield() catch {};
     }
 
     out_thread.join();

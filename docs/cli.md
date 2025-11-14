@@ -4,7 +4,7 @@ The zpack command-line tool provides an easy interface for file compression and 
 
 ## STATUS
 
-ℹ️ **Release Candidate – v0.3.0-rc.1**
+ℹ️ **Release Candidate – v0.3.2**
 
 The CLI is feature complete for the 0.3 beta cycle and currently stabilizing for a production-ready 1.0. The API remains pre-1.0 and may evolve based on feedback, but breaking changes will be highlighted in release notes.
 
@@ -135,7 +135,7 @@ Print the CLI version and exit. Helpful for scripting and verifying the active r
 
 ```bash
 zig build run -- --version
-# zpack 0.3.0-rc.1
+# zpack 0.3.2
 ```
 
 ### --help

@@ -4,7 +4,11 @@
 
 zpack is a fast compression library for Zig that provides multiple compression algorithms with a simple API. It's designed to be lightweight, efficient, and easy to integrate into Zig projects.
 
-> **Release track:** `v0.3.0-rc.1` (beta stabilization). Feature work for 0.3 is complete and the project is polishing for a 1.0 release.
+- **Quiet by default:** build scripts stay silent unless you opt into the banner with `-Dshow_build_config=true`.
+- **Async streaming ready:** helper futures (`compressStreamAsync`, `decompressStreamAsync`) plug directly into `std.Io` runtimes.
+- **Deterministic fuzzing:** pin `ZPACK_FUZZ_SEED` (or CLI `--seed`) to reproduce failures.
+
+> **Release track:** `v0.3.2` (release candidate hardening). Feature work for 0.3 is complete and the project is polishing for a 1.0 release.
 
 ## API Reference
 
@@ -81,6 +85,16 @@ Run-Length Encoding compresses sequences of identical bytes.
 
 The CLI provides command-line compression/decompression with streaming, raw mode, and benchmarking hooks.
 
+### Build Experience
+
+```bash
+# Stay quiet by default
+zig build run -- --help
+
+# Surface build configuration when auditing
+zig build -Dshow_build_config=true config
+```
+
 ### Commands
 
 #### `compress <input> [output]`
@@ -99,6 +113,9 @@ zig build run -- compress data.txt
 
 # Decompress a file
 zig build run -- decompress data.txt.zpack data.txt
+
+# Run the streaming CLI quietly, but record the configuration when needed
+zig build -Dshow_build_config=true run -- streaming compress input.txt
 ```
 
 ## Usage Examples
@@ -134,6 +151,27 @@ const rle_compressed = try zpack.RLE.compress(allocator, repetitive_data);
 // For general data, use LZ77
 const lz77_compressed = try zpack.Compression.compress(allocator, general_data);
 ```
+
+## Streaming & Async Pipelines
+
+When files are too large to materialise in memory, reach for the streaming types. For cooperative runtimes or background workers, use the async wrappers:
+
+```zig
+var threaded = std.Io.Threaded.init(std.heap.page_allocator);
+defer threaded.deinit();
+const io = threaded.io();
+
+var source = std.io.fixedBufferStream(input_bytes);
+var sink_buffer: [512 * 1024]u8 = undefined;
+var sink = std.io.fixedBufferStream(&sink_buffer);
+
+var future = zpack.compressStreamAsync(io, allocator, &source.reader(), &sink.writer(), .balanced, 64 * 1024);
+try future.await(io);
+
+const compressed_slice = sink.getWritten();
+```
+
+Pair the async helpers with `std.Io.Group` when coordinating multiple concurrent compress/decompress jobs.
 
 ## Performance Notes
 

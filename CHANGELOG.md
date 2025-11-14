@@ -1,5 +1,71 @@
 # Changelog
-# Changelog
+
+## 0.3.3 – 2025-11-13
+
+### Added - Production Features
+- **BufferPool API** (`BufferPool`) for zero-copy buffer reuse in high-throughput applications (LSP/MCP servers)
+  - Thread-safe pool with configurable limits
+  - Statistics API for monitoring pool usage
+  - Critical for preventing allocation churn in long-running servers
+- **Dictionary Compression** (`Dictionary`, `buildDictionary()`) for package managers and repetitive data
+  - Pre-train dictionaries from sample files
+  - Significant compression gains on similar files (imports, manifests, configs)
+  - Perfect for zim package manager and language tooling
+- **`compressBound()`** function for calculating worst-case compressed size
+  - Essential for pre-allocating buffers in compilers and LSPs
+  - Prevents reallocation in hot paths
+- **CompressionStats** API for monitoring and optimization
+  - Track compression ratio, savings percentage, and throughput (MB/s)
+  - Real-time metrics for blockchain, streaming, and performance-critical apps
+- **ConstrainedCompressor** for memory-limited environments
+  - Fixed memory budget (<1MB configurable)
+  - Perfect for WASM, embedded systems, and strict resource limits
+  - Predictable memory usage with sliding window
+- **ParallelCompressor** for multi-threaded compression of large files
+  - Auto-detects CPU count or manual thread configuration
+  - Splits large files into chunks compressed in parallel
+  - 2-8x speedup on multi-core systems for files >1MB
+  - Perfect for ghostchain block compression and zim package archives
+- **Compression Presets** (`Preset`) for common use cases
+  - `.package` - For zim package manager archives
+  - `.source_code` - Optimized for ghostlang/Zig source files
+  - `.binary` - For executables and compiled code
+  - `.log_files` - Excellent for repetitive structured logs
+  - `.realtime` - Fastest for LSP/MCP interactive use
+  - `.archive` - Maximum compression for long-term storage
+  - `selectPresetForFile()` - Auto-select based on file extension
+- **SIMD-Optimized Hashing** (`simd_hash`)
+  - 2-4x faster hashing on AVX2 (x86_64) and NEON (aarch64)
+  - Automatic fallback to scalar on unsupported platforms
+  - XXHash-inspired fast hash for better distribution
+
+### Changed
+- All public APIs now exported from `root.zig` for easier discovery
+- Improved error handling with clearer error types
+
+### Removed
+- Coverage instrumentation support (incompatible with Zig 0.16 test protocol)
+  - Tests still work perfectly, just no coverage metrics
+  - Can be re-added when Zig stabilizes coverage API
+
+### Fixed
+- Zig 0.16 compatibility: `@ptrCast` signature updates
+- Test suite fully passing on Zig 0.16.0-dev.1225+bf9082518
+
+## 0.3.2 – 2025-11-12
+
+### Added
+- GitHub Actions pipeline validating Linux, macOS, and Windows builds with cross-compilation smoke tests for Windows, macOS ARM, and WASM
+- Release checklist template (`docs/release.md`) to guide tagging, documentation, and artifact publication
+- Deterministic fuzzing controls via `ZPACK_FUZZ_SEED` environment variable and the optional CLI seed argument
+
+### Changed
+- CLI version bumped to `0.3.2` with cross-platform stdout handling for Windows targets
+- Build configuration banner is now opt-in via `-Dshow_build_config`; run `zig build config` to inspect features on demand
+- Documentation refreshed (build system guide, CLI guide, docs landing page, troubleshooting, performance) to reflect modern workflows and deterministic fuzz seeds
+
+### Fixed
+- `zig build -Dtarget=x86_64-windows-gnu` now succeeds thanks to platform-aware stdout writes
 
 ## 0.3.0-rc.1 – 2025-09-26
 

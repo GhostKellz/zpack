@@ -41,7 +41,7 @@
 
 **A:** Add to your `build.zig.zon`:
 ```bash
-zig fetch --save https://github.com/ghostkellz/zpack/archive/refs/heads/main.tar.gz
+zig fetch --save https://github.com/ghostkellz/zpack/archive/refs/tags/v0.3.2.tar.gz
 ```
 
 Then in your `build.zig`:
@@ -236,9 +236,9 @@ defer compressor.deinit();
 
 **A:** Yes! zpack provides a complete C API:
 
-```c
-#include "zpack.h"
-
+```
+zig fetch --save https://github.com/ghostkellz/zpack/archive/refs/tags/v0.3.2.tar.gz
+```
 int main() {
     const char* input = "Hello, World!";
     size_t input_size = strlen(input);

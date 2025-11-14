@@ -1,6 +1,6 @@
 # Modular Build System Guide
 
-> **Build only what you need - from 20KB to 100KB with 8 configuration options**
+> **Build only what you need - from 20KB to 100KB with 9 configuration options**
 
 zpack's modular build system allows you to create optimized builds tailored to your specific use case. Whether you need a minimal 20KB library for embedded systems or a full-featured 100KB enterprise solution, zpack can be configured to match your requirements.
 
@@ -36,6 +36,7 @@ zig build -Dstreaming=false -Doptimize=ReleaseSmall
 | `-Dthreading` | `true` | Enable multi-threading support | Parallel processing |
 | `-Dvalidation` | `true` | Enable data validation | Safety/reliability |
 | `-Duse_system_zlib` | `false` | Link against the platform libz instead of the bundled miniz reference | Integration flexibility |
+| `-Dshow_build_config` | `false` | Print the resolved feature matrix during the build | Developer feedback |
 
 ## 📦 **Build Presets**
 
@@ -104,8 +105,11 @@ zig build size              # Analyze binary sizes for different configs
 
 ### **Build Information**
 ```bash
-# View current configuration during build
-zig build                   # Shows enabled features at build time
+# One-off configuration report
+zig build config
+
+# Always print the feature matrix during this build
+zig build -Dshow_build_config=true
 ```
 
 ## ⚙️ **Advanced Build Configurations**

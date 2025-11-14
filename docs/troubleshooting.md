@@ -70,7 +70,7 @@ zig build -Dthreading=true
 
 **Solution:**
 
-1. Upgrade to zpack `v0.3.0-rc.1` or later. The build now links `libc` automatically whenever the system `libz` backend is enabled, fixing the null PLT resolution.
+1. Upgrade to zpack `v0.3.2` or later. The build now links `libc` automatically whenever the system `libz` backend is enabled, fixing the null PLT resolution.
 2. If you maintain a custom build script, ensure the executable links against both `libz` **and** `libc`:
    ```bash
    zig build-exe src/benchmark.zig -Duse_system_zlib=true -lc -lz
@@ -462,7 +462,7 @@ unsigned char* output = malloc(max_output_size);
    ```zig
    .dependencies = .{
        .zpack = .{
-           .url = "https://github.com/ghostkellz/zpack/archive/refs/heads/main.tar.gz",
+           .url = "https://github.com/ghostkellz/zpack/archive/refs/tags/v0.3.2.tar.gz",
            .hash = "...", // Run zig build to get correct hash
        },
    },

@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+env:
+  ZIG_VERSION: 0.16.0-dev.164+bc7955306
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Build
+        run: zig build
+
+      - name: Run tests
+        run: zig build test
+
+      - name: System libz tests
+        if: matrix.os == 'ubuntu-latest'
+        run: zig build test -Duse_system_zlib=true
+
+      - name: Fuzz smoke test
+        run: zig build fuzz -- 32
+
+      - name: Upload binaries
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zpack-${{ matrix.os }}
+          path: zig-out/bin/**
+          if-no-files-found: warn
+
+  cross:
+    name: Cross compile (${{ matrix.target }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-windows-gnu, aarch64-macos, wasm32-wasi]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Build for ${{ matrix.target }}
+        run: |
+          case "${{ matrix.target }}" in
+            wasm32-wasi)
+              zig build -Dtarget=${{ matrix.target }} -Dcli=false
+              ;;
+            *)
+              zig build -Dtarget=${{ matrix.target }}
+              ;;
+          esac
+        shell: bash
+
+      - name: Upload cross artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zpack-${{ matrix.target }}
+          path: |
+            zig-out/bin/**
+            zig-out/lib/**
+          if-no-files-found: warn

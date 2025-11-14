@@ -239,7 +239,6 @@ pub const gzip = struct {
 };
 
 test "zlib compatibility" {
-    const allocator = std.testing.allocator;
     const input = "hello world compression test";
 
     var dest: [1000]u8 = undefined;

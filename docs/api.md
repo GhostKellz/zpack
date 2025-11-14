@@ -92,6 +92,28 @@ pub const StreamingDecompressor = struct {
 ```
 Create the decompressor with the compressor's window size (64 KiB by default) and stream the emitted packets to reconstruct the original data.
 
+### Async streaming helpers
+```zig
+pub fn compressStreamAsync(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    reader: anytype,
+    writer: anytype,
+    level: CompressionLevel,
+    chunk_size: usize,
+) std.Io.Future((ZpackError || @TypeOf(writer).Error || @TypeOf(reader).Error)!void);
+
+pub fn decompressStreamAsync(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    reader: anytype,
+    writer: anytype,
+    window_size: usize,
+    chunk_size: usize,
+) std.Io.Future((ZpackError || @TypeOf(writer).Error || @TypeOf(reader).Error)!void);
+```
+Both functions forward to their synchronous counterparts via `std.Io.async`, letting you wire streaming jobs into `std.Io.Threaded` pools or any other runtime that implements the `std.Io` vtable. Call `await` on the returned future (or coordinate via `Io.Group`) when you want to synchronise.
+
 ---
 
 ## File-format helpers

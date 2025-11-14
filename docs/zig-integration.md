@@ -9,7 +9,7 @@ Learn how to integrate zpack into your Zig projects using the package manager an
 Add zpack to your project using `zig fetch`:
 
 ```bash
-zig fetch --save https://github.com/ghostkellz/zpack/archive/refs/heads/main.tar.gz
+zig fetch --save https://github.com/ghostkellz/zpack/archive/refs/tags/v0.3.2.tar.gz
 ```
 
 This will automatically:
@@ -27,7 +27,7 @@ Alternatively, you can manually add zpack to your `build.zig.zon`:
     .version = "0.1.0",
     .dependencies = .{
         .zpack = .{
-            .url = "https://github.com/ghostkellz/zpack/archive/refs/heads/main.tar.gz",
+            .url = "https://github.com/ghostkellz/zpack/archive/refs/tags/v0.3.2.tar.gz",
             .hash = "12345...", // Hash will be generated automatically
         },
     },
@@ -467,7 +467,7 @@ pub const NetworkMessage = struct {
 **Dependency not found:**
 ```bash
 # Make sure you've fetched the dependency
-zig fetch --save https://github.com/ghostkellz/zpack/archive/refs/heads/main.tar.gz
+zig fetch --save https://github.com/ghostkellz/zpack/archive/refs/tags/v0.3.2.tar.gz
 
 # Verify build.zig.zon contains zpack dependency
 cat build.zig.zon

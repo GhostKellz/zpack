@@ -41,6 +41,28 @@ while (true) {
 }
 ```
 
+### **Async Streaming Pipelines**
+```zig
+const zpack = @import("zpack");
+
+var threaded = std.Io.Threaded.init(std.heap.page_allocator);
+defer threaded.deinit();
+const io = threaded.io();
+
+var reader = SliceReader{ .data = input_data };
+var writer = FileWriter{ .file = &output_file };
+
+var compressed_reader = SliceReader{ .data = compressed_data };
+var decoded_writer = FileWriter{ .file = &decoded_output };
+
+var compress_task = zpack.compressStreamAsync(io, allocator, &reader, &writer, .balanced, 64 * 1024);
+var decompress_task = zpack.decompressStreamAsync(io, allocator, &compressed_reader, &decoded_writer, 0, 32 * 1024);
+
+try compress_task.await(io);
+try decompress_task.await(io);
+```
+Async helpers integrate with Zig's `std.Io` runtimes (thread pools, io_uring, kqueue). Each call returns a `std.Io.Future`, so you can `await`, cancel, or compose them with `Io.Group` alongside other asynchronous work.
+
 ## 📊 **Memory Usage Comparison**
 
 | Method | Memory Usage | File Size Limit | Use Case |

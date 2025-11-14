@@ -11,7 +11,10 @@ pub const BuildConfig = struct {
     enable_threading: bool = true,
     enable_validation: bool = true,
     use_system_zlib: bool = false,
+    show_build_config: bool = false,
 };
+
+var cached_build_config: ?BuildConfig = null;
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -23,12 +26,15 @@ pub fn build(b: *std.Build) void {
         .enable_rle = b.option(bool, "rle", "Enable RLE compression (default: true)") orelse true,
         .enable_streaming = b.option(bool, "streaming", "Enable streaming APIs (default: true)") orelse true,
         .enable_cli = b.option(bool, "cli", "Build CLI tool (default: true)") orelse true,
-        .enable_benchmarks = b.option(bool, "benchmarks", "Include benchmark tools (default: false)") orelse false,
+    .enable_benchmarks = b.option(bool, "benchmarks", "Include benchmark tools (default: false)") orelse false,
         .enable_simd = b.option(bool, "simd", "Enable SIMD optimizations (default: true)") orelse true,
         .enable_threading = b.option(bool, "threading", "Enable multi-threading support (default: true)") orelse true,
         .enable_validation = b.option(bool, "validation", "Enable data validation (default: true)") orelse true,
         .use_system_zlib = b.option(bool, "use_system_zlib", "Link against system libz instead of bundled miniz (default: false)") orelse false,
+        .show_build_config = b.option(bool, "show_build_config", "Print build configuration summary (default: false)") orelse false,
     };
+
+    cached_build_config = config;
 
     // Create build options module
     const options = b.addOptions();
@@ -41,17 +47,9 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "use_system_zlib", config.use_system_zlib);
     const options_module = options.createModule();
 
-    // Print build configuration
-    std.debug.print("\n=== zpack Build Configuration ===\n", .{});
-    std.debug.print("LZ77 compression:      {}\n", .{config.enable_lz77});
-    std.debug.print("RLE compression:       {}\n", .{config.enable_rle});
-    std.debug.print("Streaming APIs:        {}\n", .{config.enable_streaming});
-    std.debug.print("CLI tool:              {}\n", .{config.enable_cli});
-    std.debug.print("Benchmark tools:       {}\n", .{config.enable_benchmarks});
-    std.debug.print("SIMD optimizations:    {}\n", .{config.enable_simd});
-    std.debug.print("Multi-threading:       {}\n", .{config.enable_threading});
-    std.debug.print("Data validation:       {}\n", .{config.enable_validation});
-    std.debug.print("===================================\n\n", .{});
+    if (config.show_build_config) {
+        printBuildConfig(config);
+    }
 
     // Main library module
     const mod = b.addModule("zpack", .{
@@ -243,6 +241,19 @@ pub fn build(b: *std.Build) void {
     }
 
     // Configuration validation step
+    const show_config_step = b.step("config", "Print effective build configuration");
+    show_config_step.makeFn = struct {
+        fn run(step: *std.Build.Step, make_opts: std.Build.Step.MakeOptions) anyerror!void {
+            _ = step;
+            _ = make_opts;
+            if (cached_build_config) |cfg| {
+                printBuildConfig(cfg);
+            } else {
+                std.debug.print("(no build configuration cached)\n", .{});
+            }
+        }
+    }.run;
+
     const validate_step = b.step("validate", "Validate build configuration");
     validate_step.makeFn = validateConfiguration;
 
@@ -319,9 +330,11 @@ fn showHelp(step: *std.Build.Step, options: std.Build.Step.MakeOptions) anyerror
     std.debug.print("  -Dstreaming=false     Disable streaming APIs\n", .{});
     std.debug.print("  -Dcli=false           Skip CLI tool build\n", .{});
     std.debug.print("  -Dbenchmarks=true     Include benchmark tools\n", .{});
+    std.debug.print("  -Dcoverage=true       Enable coverage instrumentation for tests\n", .{});
     std.debug.print("  -Dsimd=false          Disable SIMD optimizations\n", .{});
     std.debug.print("  -Dthreading=false     Disable multi-threading\n", .{});
     std.debug.print("  -Dvalidation=false    Skip data validation\n\n", .{});
+    std.debug.print("  -Dshow_build_config   Print configuration summary during build\n\n", .{});
 
     std.debug.print("BUILD PRESETS:\n", .{});
     std.debug.print("  zig build minimal     LZ77 only, no CLI (~20KB)\n", .{});
@@ -331,6 +344,7 @@ fn showHelp(step: *std.Build.Step, options: std.Build.Step.MakeOptions) anyerror
     std.debug.print("SPECIAL BUILDS:\n", .{});
     std.debug.print("  zig build wasm        WebAssembly library\n", .{});
     std.debug.print("  zig build profile     Profiling build (Debug only)\n", .{});
+    std.debug.print("  zig build config      Print effective build configuration\n", .{});
 
     std.debug.print("ANALYSIS:\n", .{});
     std.debug.print("  zig build size        Analyze binary sizes\n", .{});
@@ -349,4 +363,18 @@ fn buildWASM(step: *std.Build.Step, options: std.Build.Step.MakeOptions) anyerro
     std.debug.print("🌐 Building WebAssembly library...\n", .{});
     std.debug.print("   Target: wasm32-freestanding\n", .{});
     std.debug.print("   Manual command: zig build-lib -target wasm32-freestanding -Doptimize=ReleaseSmall src/wasm.zig\n", .{});
+}
+
+fn printBuildConfig(config: BuildConfig) void {
+    std.debug.print("\n=== zpack Build Configuration ===\n", .{});
+    std.debug.print("LZ77 compression:      {}\n", .{config.enable_lz77});
+    std.debug.print("RLE compression:       {}\n", .{config.enable_rle});
+    std.debug.print("Streaming APIs:        {}\n", .{config.enable_streaming});
+    std.debug.print("CLI tool:              {}\n", .{config.enable_cli});
+    std.debug.print("Benchmark tools:       {}\n", .{config.enable_benchmarks});
+    std.debug.print("SIMD optimizations:    {}\n", .{config.enable_simd});
+    std.debug.print("Multi-threading:       {}\n", .{config.enable_threading});
+    std.debug.print("Data validation:       {}\n", .{config.enable_validation});
+    std.debug.print("System libz backend:   {}\n", .{config.use_system_zlib});
+    std.debug.print("===================================\n\n", .{});
 }

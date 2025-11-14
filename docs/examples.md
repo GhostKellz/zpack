@@ -170,6 +170,32 @@ pub fn compressLargeFile(
 }
 ```
 
+### Async Streaming with `std.Io`
+
+```zig
+const std = @import("std");
+const zpack = @import("zpack");
+
+pub fn asyncCompress(
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    chunk_size: usize,
+) ![]const u8 {
+    var threaded = std.Io.Threaded.init(std.heap.page_allocator);
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var source = std.io.fixedBufferStream(input);
+    var output_buffer: [512 * 1024]u8 = undefined;
+    var sink = std.io.fixedBufferStream(&output_buffer);
+
+    var future = zpack.compressStreamAsync(io, allocator, &source.reader(), &sink.writer(), .balanced, chunk_size);
+    try future.await(io);
+
+    return sink.getWritten();
+}
+```
+
 ### Compression with Custom Configuration
 
 ```zig

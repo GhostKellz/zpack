@@ -2,6 +2,16 @@
 const std = @import("std");
 const build_options = @import("build_options");
 
+// Public API exports
+pub const BufferPool = @import("buffer_pool.zig").BufferPool;
+pub const Dictionary = @import("dictionary.zig").Dictionary;
+pub const buildDictionary = @import("dictionary.zig").buildDictionary;
+pub const ConstrainedCompressor = @import("constrained.zig").ConstrainedCompressor;
+pub const ParallelCompressor = @import("parallel.zig").ParallelCompressor;
+pub const Preset = @import("presets.zig").Preset;
+pub const selectPresetForFile = @import("presets.zig").selectPresetForFile;
+pub const simd_hash = @import("simd_hash.zig");
+
 pub const ZpackError = error{
     InvalidData,
     CorruptedData,
@@ -438,6 +448,68 @@ pub fn decompressStream(allocator: std.mem.Allocator, reader: anytype, writer: a
     try decompressor.decompressReader(writer, reader, chunk_size);
 }
 
+pub fn compressStreamAsync(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    reader: anytype,
+    writer: anytype,
+    level: CompressionLevel,
+    chunk_size: usize,
+) std.Io.Future((ZpackError || WriterError(@TypeOf(writer)) || ReaderError(@TypeOf(reader)))!void) {
+    const Result = (ZpackError || WriterError(@TypeOf(writer)) || ReaderError(@TypeOf(reader)))!void;
+    const Context = struct {
+        allocator: std.mem.Allocator,
+        reader: @TypeOf(reader),
+        writer: @TypeOf(writer),
+        level: CompressionLevel,
+        chunk_size: usize,
+    };
+    const Runner = struct {
+        fn run(ctx: Context) Result {
+            return compressStream(ctx.allocator, ctx.reader, ctx.writer, ctx.level, ctx.chunk_size);
+        }
+    };
+    const context = Context{
+        .allocator = allocator,
+        .reader = reader,
+        .writer = writer,
+        .level = level,
+        .chunk_size = chunk_size,
+    };
+    return std.Io.async(io, Runner.run, .{context});
+}
+
+pub fn decompressStreamAsync(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    reader: anytype,
+    writer: anytype,
+    window_size: usize,
+    chunk_size: usize,
+) std.Io.Future((ZpackError || WriterError(@TypeOf(writer)) || ReaderError(@TypeOf(reader)))!void) {
+    const Result = (ZpackError || WriterError(@TypeOf(writer)) || ReaderError(@TypeOf(reader)))!void;
+    const Context = struct {
+        allocator: std.mem.Allocator,
+        reader: @TypeOf(reader),
+        writer: @TypeOf(writer),
+        window_size: usize,
+        chunk_size: usize,
+    };
+    const Runner = struct {
+        fn run(ctx: Context) Result {
+            return decompressStream(ctx.allocator, ctx.reader, ctx.writer, ctx.window_size, ctx.chunk_size);
+        }
+    };
+    const context = Context{
+        .allocator = allocator,
+        .reader = reader,
+        .writer = writer,
+        .window_size = window_size,
+        .chunk_size = chunk_size,
+    };
+    return std.Io.async(io, Runner.run, .{context});
+}
+
 const TestArrayListWriter = struct {
     list: *std.ArrayListUnmanaged(u8),
     allocator: std.mem.Allocator,
@@ -464,6 +536,39 @@ const TestSliceReader = struct {
 };
 
 // Conditional compilation based on build options
+/// Calculate worst-case compressed size for given input size
+/// Critical for pre-allocating buffers in LSP/MCP servers
+pub fn compressBound(input_size: usize) usize {
+    // LZ77 worst case: every byte becomes (0, byte) = 2 bytes
+    // Add 10% overhead for headers and edge cases
+    return input_size * 2 + (input_size / 10) + 1024;
+}
+
+/// Compression statistics for monitoring and optimization
+pub const CompressionStats = struct {
+    input_bytes: usize = 0,
+    output_bytes: usize = 0,
+    matches_found: usize = 0,
+    literals: usize = 0,
+    compression_time_ns: u64 = 0,
+
+    pub fn ratio(self: CompressionStats) f64 {
+        if (self.input_bytes == 0) return 0.0;
+        return @as(f64, @floatFromInt(self.output_bytes)) / @as(f64, @floatFromInt(self.input_bytes));
+    }
+
+    pub fn savings(self: CompressionStats) f64 {
+        return 1.0 - self.ratio();
+    }
+
+    pub fn throughputMBps(self: CompressionStats) f64 {
+        if (self.compression_time_ns == 0) return 0.0;
+        const seconds = @as(f64, @floatFromInt(self.compression_time_ns)) / 1_000_000_000.0;
+        const mb = @as(f64, @floatFromInt(self.input_bytes)) / (1024.0 * 1024.0);
+        return mb / seconds;
+    }
+};
+
 pub const Compression = if (build_options.enable_lz77) struct {
     pub fn compress(allocator: std.mem.Allocator, input: []const u8) ZpackError![]u8 {
         return compressWithLevel(allocator, input, .balanced);
@@ -995,6 +1100,35 @@ test "streaming convenience functions" {
 //
 //     try compressor.compress(input, &output);
 //     const compressed = try output.toOwnedSlice(allocator);
+
+test "async streaming convenience functions" {
+    if (!build_options.enable_streaming) return error.SkipZigTest;
+
+    const allocator = std.testing.allocator;
+    var threaded = std.Io.Threaded.init(std.heap.page_allocator);
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    const input = "async streaming convenience API validation";
+
+    var compressed = std.ArrayListUnmanaged(u8){};
+    defer compressed.deinit(allocator);
+    var compressed_writer = TestArrayListWriter{ .list = &compressed, .allocator = allocator };
+
+    var input_reader = TestSliceReader{ .data = input };
+    var compress_future = compressStreamAsync(io, allocator, &input_reader, &compressed_writer, .balanced, 12);
+    try compress_future.await(io);
+
+    var decoded = std.ArrayListUnmanaged(u8){};
+    defer decoded.deinit(allocator);
+    var decoded_writer = TestArrayListWriter{ .list = &decoded, .allocator = allocator };
+
+    var compressed_reader = TestSliceReader{ .data = compressed.items };
+    var decompress_future = decompressStreamAsync(io, allocator, &compressed_reader, &decoded_writer, 0, 16);
+    try decompress_future.await(io);
+
+    try std.testing.expectEqualSlices(u8, input, decoded.items);
+}
 //     defer allocator.free(compressed);
 //
 //     const decompressed = try Compression.decompress(allocator, compressed);
