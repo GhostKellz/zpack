@@ -20,7 +20,28 @@ const FuzzError = error{
     StreamingMismatch,
 };
 
-pub fn main() !void {
+fn collectArgs(allocator: std.mem.Allocator, init_args: std.process.Args) ![]const []const u8 {
+    var iter = std.process.Args.Iterator.initAllocator(init_args, allocator) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    defer iter.deinit();
+    var list: std.ArrayList([]const u8) = .empty;
+    errdefer {
+        for (list.items) |arg| allocator.free(arg);
+        list.deinit(allocator);
+    }
+    while (iter.next()) |arg| {
+        try list.append(allocator, try allocator.dupe(u8, arg));
+    }
+    return list.toOwnedSlice(allocator);
+}
+
+fn freeArgs(allocator: std.mem.Allocator, args: []const []const u8) void {
+    for (args) |arg| allocator.free(arg);
+    allocator.free(args);
+}
+
+pub fn main(init: std.process.Init.Minimal) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer {
         switch (gpa.deinit()) {
@@ -30,8 +51,8 @@ pub fn main() !void {
     }
     const allocator = gpa.allocator();
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try collectArgs(allocator, init.args);
+    defer freeArgs(allocator, args);
 
     var iterations: usize = 256;
     if (args.len > 1) {
@@ -42,25 +63,19 @@ pub fn main() !void {
         if (iterations == 0) iterations = 1;
     }
 
-    var seed = std.crypto.random.int(u64);
+    var seed: u64 = blk: {
+        const now = std.time.Instant.now() catch break :blk 0x12345678;
+        // Combine seconds and nanoseconds for seed
+        const sec: u64 = @bitCast(now.timestamp.sec);
+        const nsec: u64 = @intCast(now.timestamp.nsec);
+        break :blk sec ^ (nsec << 32);
+    };
 
     if (args.len > 2) {
         seed = std.fmt.parseInt(u64, args[2], 0) catch |err| {
             std.log.err("invalid seed '{s}': {}", .{ args[2], err });
             return err;
         };
-    } else {
-        const seed_env = std.process.getEnvVarOwned(allocator, "ZPACK_FUZZ_SEED") catch |err| switch (err) {
-            error.EnvironmentVariableNotFound => null,
-            else => return err,
-        };
-        if (seed_env) |value| {
-            defer allocator.free(value);
-            seed = std.fmt.parseInt(u64, value, 0) catch |err| {
-                std.log.err("invalid seed from ZPACK_FUZZ_SEED '{s}': {}", .{ value, err });
-                return err;
-            };
-        }
     }
 
     var prng = Random.DefaultPrng.init(seed);

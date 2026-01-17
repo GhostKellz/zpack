@@ -102,7 +102,7 @@ pub fn build(b: *std.Build) void {
         }
 
         if (config.use_system_zlib) {
-            exe.linkSystemLibrary("z");
+            exe.root_module.linkSystemLibrary("z", .{});
         }
     }
 
@@ -128,7 +128,7 @@ pub fn build(b: *std.Build) void {
         });
 
         if (config.use_system_zlib) {
-            benchmark.linkSystemLibrary("z");
+            benchmark.root_module.linkSystemLibrary("z", .{});
         }
 
         b.installArtifact(benchmark);
@@ -158,7 +158,7 @@ pub fn build(b: *std.Build) void {
         .root_module = fuzz_root,
     });
     if (config.use_system_zlib) {
-        fuzz.linkSystemLibrary("z");
+        fuzz.root_module.linkSystemLibrary("z", .{});
     }
 
     b.installArtifact(fuzz);
@@ -188,7 +188,7 @@ pub fn build(b: *std.Build) void {
         });
 
         if (config.use_system_zlib) {
-            profiler.linkSystemLibrary("z");
+            profiler.root_module.linkSystemLibrary("z", .{});
         }
 
         const profile_step = b.step("profile", "Run compression profiling");
@@ -202,7 +202,7 @@ pub fn build(b: *std.Build) void {
         .root_module = mod,
     });
     if (config.use_system_zlib) {
-        mod_tests.linkSystemLibrary("z");
+        mod_tests.root_module.linkSystemLibrary("z", .{});
     }
 
     const run_mod_tests = b.addRunArtifact(mod_tests);
@@ -227,7 +227,7 @@ pub fn build(b: *std.Build) void {
             .root_module = exe_root,
         });
         if (config.use_system_zlib) {
-            exe_tests.linkSystemLibrary("z");
+            exe_tests.root_module.linkSystemLibrary("z", .{});
         }
 
         const run_exe_tests = b.addRunArtifact(exe_tests);
